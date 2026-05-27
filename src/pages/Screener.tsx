@@ -57,7 +57,7 @@ function generateRiskAlerts(quotes: YQuote[]): { symbol: string; name: string; r
       const high52 = q.fiftyTwoWeekHigh ?? 0;
       const price = q.regularMarketPrice ?? 0;
       const vol = q.regularMarketVolume ?? 0;
-      const avgVol = q.averageDailyVolume3Month ?? 1;
+      const avgVol = q.averageDailyVolume3Month ?? 0;
 
       const risks: string[] = [];
       let level: 'high' | 'medium' = 'medium';
@@ -67,7 +67,7 @@ function generateRiskAlerts(quotes: YQuote[]): { symbol: string; name: string; r
       if (chg < -3) { risks.push('放量下跌'); level = 'high'; score += 3; }
       if (high52 > 0 && price > 0 && price > high52 * 0.95) { risks.push('接近52周高位'); score += 2; }
       if (pe < 0) { risks.push('亏损状态'); level = 'high'; score += 3; }
-      if (vol > avgVol * 2 && chg < 0) { risks.push('放量下跌'); level = 'high'; score += 2; }
+      if (avgVol > 0 && vol > avgVol * 2 && chg < 0) { risks.push('放量下跌'); level = 'high'; score += 2; }
       if (price > 0 && high52 > 0 && price < high52 * 0.6) { risks.push('距52周高回撤>40%'); score += 2; }
 
       return { symbol: q.symbol ?? '', name: (q.shortName ?? '').slice(0, 16), risk: risks.join(' · ') || '暂无显著风险信号', level, score };

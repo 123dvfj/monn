@@ -11,27 +11,32 @@ function generateFlowSummary(q: YQuote | undefined, symbol: string): string[] {
   const price = q.regularMarketPrice;
   const chgPct = q.regularMarketChangePercent ?? 0;
   const vol = q.regularMarketVolume ?? 0;
-  const avgVol = q.averageDailyVolume3Month ?? 1;
-  const volRatio = avgVol > 0 ? vol / avgVol : 1;
+  const avgVol = q.averageDailyVolume3Month ?? 0;
+  const hasAvgVol = avgVol > 0;
+  const volRatio = hasAvgVol ? vol / avgVol : NaN;
 
   const points: string[] = [];
 
   // Volume analysis
-  if (volRatio > 2) {
-    points.push(`今日成交量是日均的 ${volRatio.toFixed(1)} 倍，出现极度放量，价格${chgPct >= 0 ? '上涨' : '下跌'} ${Math.abs(chgPct).toFixed(2)}%，资金参与度极高。`);
-  } else if (volRatio > 1.3) {
-    points.push(`今日成交量是日均的 ${volRatio.toFixed(1)} 倍，温和放量，${chgPct >= 0 ? '买盘积极性提升' : '抛压有所增加'}。`);
-  } else if (volRatio > 0.7) {
-    points.push(`今日成交量与日均持平（${volRatio.toFixed(1)}x），市场情绪平稳，资金以存量博弈为主。`);
+  if (hasAvgVol) {
+    if (volRatio > 2) {
+      points.push(`今日成交量是日均的 ${volRatio.toFixed(1)} 倍，出现极度放量，价格${chgPct >= 0 ? '上涨' : '下跌'} ${Math.abs(chgPct).toFixed(2)}%，资金参与度极高。`);
+    } else if (volRatio > 1.3) {
+      points.push(`今日成交量是日均的 ${volRatio.toFixed(1)} 倍，温和放量，${chgPct >= 0 ? '买盘积极性提升' : '抛压有所增加'}。`);
+    } else if (volRatio > 0.7) {
+      points.push(`今日成交量与日均持平（${volRatio.toFixed(1)}x），市场情绪平稳，资金以存量博弈为主。`);
+    } else {
+      points.push(`今日成交量仅为日均的 ${(volRatio * 100).toFixed(0)}%，交投清淡，市场关注度较低。`);
+    }
   } else {
-    points.push(`今日成交量仅为日均的 ${(volRatio * 100).toFixed(0)}%，交投清淡，市场关注度较低。`);
+    points.push(`今日成交量 ${(vol / 10000).toFixed(0)} 万，暂无日均成交量数据可供对比。`);
   }
 
   // Price momentum
   if (chgPct > 3) {
     points.push(`涨幅 ${chgPct.toFixed(2)}%，强势拉升信号，需关注后续量能能否持续。若缩量上涨则需警惕冲高回落。`);
   } else if (chgPct < -3) {
-    points.push(`跌幅 ${Math.abs(chgPct).toFixed(2)}%，资金流出明显${volRatio > 1.5 ? '，放量下跌需警惕进一步下行风险' : ''}。`);
+    points.push(`跌幅 ${Math.abs(chgPct).toFixed(2)}%，资金流出明显${hasAvgVol && volRatio > 1.5 ? '，放量下跌需警惕进一步下行风险' : ''}。`);
   } else if (Math.abs(chgPct) < 0.5) {
     points.push(`价格波动极小（${chgPct.toFixed(2)}%），多空力量均衡，资金呈观望态度。`);
   }
@@ -80,7 +85,8 @@ export default function Capital() {
   const chgPct = q?.regularMarketChangePercent ?? 0;
   const vol = q?.regularMarketVolume ?? 0;
   const avgVol = q?.averageDailyVolume3Month ?? 0;
-  const volRatio = avgVol > 0 ? vol / avgVol : 1;
+  const hasAvgVol = avgVol > 0;
+  const volRatio = hasAvgVol ? vol / avgVol : NaN;
   const dayHigh = q?.regularMarketDayHigh ?? price;
   const dayLow = q?.regularMarketDayLow ?? price;
   const dayRange = dayHigh - dayLow;
@@ -158,11 +164,11 @@ export default function Capital() {
         <div className="dashboard-grid fixed-3col mb-4">
           <div className="card" style={{ textAlign: 'center' }}>
             <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>成交量 vs 日均</div>
-            <div className="stat-value" style={{ fontSize: '28px', marginTop: 8, color: volRatio > 1.5 ? 'var(--color-up)' : volRatio < 0.5 ? 'var(--color-down)' : 'var(--text-primary)' }}>
-              {volRatio.toFixed(1)}x
+            <div className="stat-value" style={{ fontSize: '28px', marginTop: 8, color: hasAvgVol ? (volRatio > 1.5 ? 'var(--color-up)' : volRatio < 0.5 ? 'var(--color-down)' : 'var(--text-primary)') : 'var(--text-tertiary)' }}>
+              {hasAvgVol ? `${volRatio.toFixed(1)}x` : '---'}
             </div>
             <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: 4 }}>
-              当日 {(vol / 10000).toFixed(0)}万 / 日均 {(avgVol / 10000).toFixed(0)}万
+              当日 {(vol / 10000).toFixed(0)}万{hasAvgVol ? ` / 日均 ${(avgVol / 10000).toFixed(0)}万` : '（无日均数据）'}
             </div>
           </div>
           <div className="card" style={{ textAlign: 'center' }}>
@@ -178,7 +184,8 @@ export default function Capital() {
           <div className="card" style={{ textAlign: 'center' }}>
             <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>量价配合信号</div>
             <div className="stat-value" style={{ fontSize: '24px', marginTop: 8, color: chgPct > 0 && volRatio > 1.2 ? 'var(--color-up)' : chgPct < 0 && volRatio > 1.2 ? 'var(--color-down)' : 'var(--text-secondary)' }}>
-              {chgPct > 0 && volRatio > 1.2 ? '放量上涨 ▲' :
+              {!hasAvgVol ? '数据不足 —' :
+               chgPct > 0 && volRatio > 1.2 ? '放量上涨 ▲' :
                chgPct < 0 && volRatio > 1.2 ? '放量下跌 ▼' :
                chgPct > 0 && volRatio < 0.7 ? '缩量上涨 ↗' :
                chgPct < 0 && volRatio < 0.7 ? '缩量下跌 ↘' : '量价均衡 —'}
@@ -192,9 +199,9 @@ export default function Capital() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {[
               { label: '当日成交量', value: vol > 0 ? `${(vol / 10000).toFixed(0)}万` : '---',
-                bar: Math.min(100, volRatio * 33), color: 'var(--color-accent)' },
-              { label: '日均成交量(3M)', value: avgVol > 0 ? `${(avgVol / 10000).toFixed(0)}万` : '---',
-                bar: 33, color: 'var(--text-tertiary)' },
+                bar: hasAvgVol ? Math.min(100, volRatio * 33) : 100, color: 'var(--color-accent)' },
+              { label: '日均成交量(3M)', value: hasAvgVol ? `${(avgVol / 10000).toFixed(0)}万` : '暂无数据',
+                bar: hasAvgVol ? 33 : 0, color: 'var(--text-tertiary)' },
             ].map((item) => (
               <div key={item.label} className="flex items-center gap-3">
                 <span style={{ width: 120, fontSize: '13px', color: 'var(--text-secondary)' }}>{item.label}</span>
@@ -205,12 +212,12 @@ export default function Capital() {
               </div>
             ))}
           </div>
-          {volRatio > 2 && (
+          {hasAvgVol && volRatio > 2 && (
             <div style={{ marginTop: 12, padding: '8px 12px', background: 'var(--color-up-bg)', borderRadius: 4, fontSize: '12px', color: 'var(--color-up)' }}>
               成交量异常放大（{volRatio.toFixed(1)}x），可能受事件驱动，建议关注相关公告或新闻。
             </div>
           )}
-          {volRatio < 0.3 && avgVol > 0 && (
+          {hasAvgVol && volRatio < 0.3 && (
             <div style={{ marginTop: 12, padding: '8px 12px', background: 'var(--bg-tertiary)', borderRadius: 4, fontSize: '12px', color: 'var(--text-tertiary)' }}>
               成交量极度萎缩（{volRatio.toFixed(1)}x），市场参与度低，可能是盘整蓄力期。
             </div>
@@ -253,14 +260,14 @@ export default function Capital() {
           <div className="card">
             <div className="card-title mb-4">成交量异常评分</div>
             <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '40px', fontWeight: 700, color: volRatio > 2 ? 'var(--color-up)' : volRatio > 1.3 ? 'var(--color-warning)' : 'var(--text-secondary)' }}>
-                {volRatio > 3 ? '🔥' : volRatio > 2 ? '▲' : volRatio > 1.3 ? '▶' : '—'}
+              <div style={{ fontSize: '40px', fontWeight: 700, color: hasAvgVol ? (volRatio > 2 ? 'var(--color-up)' : volRatio > 1.3 ? 'var(--color-warning)' : 'var(--text-secondary)') : 'var(--text-tertiary)' }}>
+                {!hasAvgVol ? '—' : volRatio > 3 ? '🔥' : volRatio > 2 ? '▲' : volRatio > 1.3 ? '▶' : '—'}
               </div>
               <div style={{ fontSize: '14px', marginTop: 8 }}>
-                {volRatio > 3 ? '极度活跃' : volRatio > 2 ? '显著放量' : volRatio > 1.3 ? '温和放量' : volRatio > 0.5 ? '正常交投' : '极度冷清'}
+                {!hasAvgVol ? '无日均数据' : volRatio > 3 ? '极度活跃' : volRatio > 2 ? '显著放量' : volRatio > 1.3 ? '温和放量' : volRatio > 0.5 ? '正常交投' : '极度冷清'}
               </div>
               <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: 12 }}>
-                量比: <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{volRatio.toFixed(2)}x</span>
+                量比: <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{hasAvgVol ? volRatio.toFixed(2) + 'x' : '---'}</span>
                 &nbsp;|&nbsp;
                 换手估算: <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                   {q?.marketCap ? `${((vol * price / q.marketCap) * 100).toFixed(3)}%` : '---'}

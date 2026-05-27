@@ -47,7 +47,7 @@ function generateAISummary(q: YQuote | undefined, composite: CompositeResult | n
 
   // Volume analysis
   const vol = q.regularMarketVolume ?? 0;
-  const avgVol = q.averageDailyVolume3Month ?? 1;
+  const avgVol = q.averageDailyVolume3Month ?? 0;
   if (vol > 0 && avgVol > 0) {
     const volRatio = vol / avgVol;
     if (volRatio > 1.5) points.push(`今日成交量显著放大（${volRatio.toFixed(1)}倍于日均），市场关注度提升，可能存在事件驱动。`);

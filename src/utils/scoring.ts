@@ -110,7 +110,7 @@ function scoreFundamental(q: YQuote): FundScoreDetail {
 
   // 5. Volume vs Average (market attention)
   const vol = q.regularMarketVolume ?? 0;
-  const avgVol = q.averageDailyVolume3Month ?? 1;
+  const avgVol = q.averageDailyVolume3Month ?? 0;
   if (vol > 0 && avgVol > 0) {
     const ratio = vol / avgVol;
     let s: number, rn: string;
