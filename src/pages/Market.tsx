@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { createChart, ColorType, type IChartApi, type ISeriesApi, type CandlestickData, type HistogramData, type Time } from 'lightweight-charts';
+import { createChart, ColorType } from 'lightweight-charts';
+import type { IChartApi, ISeriesApi, CandlestickData, HistogramData, Time } from 'lightweight-charts';
 import { useQuotes, useChart, ALL_HK_STOCKS, ALL_US_STOCKS } from '../hooks/useStockData';
 import { useSearch } from '../hooks/useStockData';
 import { useStore } from '../stores/useStore';

@@ -1,7 +1,8 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useQuotes, ALL_HK_STOCKS, ALL_US_STOCKS } from '../hooks/useStockData';
 import type { YQuote } from '../services/yahooFinance';
-import { computeCompositeScore, scoreToRating, type CompositeResult } from '../utils/scoring';
+import { computeCompositeScore, scoreToRating } from '../utils/scoring';
+import type { CompositeResult } from '../utils/scoring';
 import { useCountUp } from '../hooks/useCountUp';
 import { useT } from '../i18n/I18nContext';
 
