@@ -59,6 +59,16 @@ export const ALL_US_STOCKS = [
   'T', 'VZ', 'TMUS', 'NFLX', 'SPOT',
   // Aerospace & Defense
   'BA', 'LMT', 'RTX', 'SPCE',
+  // ETFs - Broad Market
+  'SPY', 'QQQ', 'DIA', 'IWM', 'VTI', 'VOO', 'IVV',
+  // ETFs - Leveraged
+  'TQQQ', 'SQQQ', 'UPRO', 'SPXU', 'TNA', 'SOXL',
+  // ETFs - Sector
+  'XLK', 'XLF', 'XLE', 'XLV', 'XLY', 'XLI', 'XLB',
+  // ETFs - International & China
+  'EEM', 'FXI', 'KWEB', 'EFA', 'VWO',
+  // ETFs - Bond & Others
+  'TLT', 'AGG', 'GLD', 'VXX',
   // Others
   'UBER', 'ABNB', 'SNAP', 'HOOD', 'RBLX',
 ];
