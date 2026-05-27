@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { useQuotes, ALL_HK_STOCKS, ALL_US_STOCKS } from '../hooks/useStockData';
 import type { YQuote } from '../services/yahooFinance';
 
@@ -8,13 +8,179 @@ interface FilterCondition {
   enabled: boolean;
   min: string;
   max: string;
-  // Which field to filter on
   field: keyof YQuote;
 }
 
-export default function Screener() {
-  const { quotes, loading } = useQuotes([...ALL_HK_STOCKS, ...ALL_US_STOCKS], 60_000);
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
 
+const ALL_STOCKS_FULL = [...ALL_HK_STOCKS, ...ALL_US_STOCKS];
+
+function analyzeScreenerResults(results: YQuote[]): {
+  topByChange: YQuote[];
+  topByVolume: YQuote[];
+  avgPE: number;
+  upCount: number;
+  downCount: number;
+} {
+  const withPrice = results.filter((q) => q.regularMarketPrice > 0);
+  const topByChange = [...withPrice].sort((a, b) => (b.regularMarketChangePercent ?? 0) - (a.regularMarketChangePercent ?? 0)).slice(0, 5);
+  const topByVolume = [...withPrice].sort((a, b) => (b.regularMarketVolume ?? 0) - (a.regularMarketVolume ?? 0)).slice(0, 5);
+  const peValues = withPrice.filter((q) => (q.trailingPE ?? 0) > 0).map((q) => q.trailingPE!);
+  const avgPE = peValues.length > 0 ? peValues.reduce((a, b) => a + b, 0) / peValues.length : 0;
+  const upCount = withPrice.filter((q) => (q.regularMarketChangePercent ?? 0) > 0).length;
+  const downCount = withPrice.filter((q) => (q.regularMarketChangePercent ?? 0) < 0).length;
+  return { topByChange, topByVolume, avgPE, upCount, downCount };
+}
+
+function generateRecommendations(quotes: YQuote[]): {
+  symbol: string; name: string; score: number; reason: string; style: string; risk: string;
+}[] {
+  const valid = quotes.filter((q) => q.regularMarketPrice > 0 && (q.trailingPE ?? 0) > 0 && q.marketCap);
+  if (valid.length === 0) return [];
+
+  return valid
+    .map((q) => {
+      const pe = q.trailingPE ?? 99;
+      const chg = q.regularMarketChangePercent ?? 0;
+      const cap = q.marketCap ?? 0;
+      let score = 50;
+
+      // PE scoring: lower is better but not negative
+      if (pe > 0 && pe < 15) score += 20;
+      else if (pe < 25) score += 10;
+      else if (pe < 40) score += 0;
+      else score -= 10;
+
+      // Recent momentum: positive change is good
+      if (chg > 2) score += 10;
+      else if (chg > 0) score += 5;
+      else if (chg < -2) score -= 10;
+
+      // Market cap: large cap = stable
+      if (cap > 1e12) score += 15;
+      else if (cap > 1e11) score += 10;
+      else if (cap > 1e10) score += 5;
+
+      const style = cap > 1e12 ? '长线价值' : cap > 5e10 ? '中线稳健' : '短线博弈';
+      const risk = cap > 1e12 ? '低' : cap > 5e10 ? '中低' : '中';
+      const isHK = /^\d{5}$/.test(q.symbol ?? '');
+
+      let reason = '';
+      if (pe < 15) reason = '低估值+安全边际充足';
+      else if (pe < 25) reason = '估值合理+基本面稳健';
+      else reason = '成长性溢价+市场预期高';
+      if (chg > 2) reason += '+近期动量强势';
+      else if (chg < -2) reason += '+短期超跌反弹机会';
+
+      return {
+        symbol: q.symbol ?? '',
+        name: (q.shortName ?? q.longName ?? '').slice(0, 20),
+        score: Math.min(95, Math.max(30, score)),
+        reason,
+        style,
+        risk,
+      };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 10);
+}
+
+function generateRiskAlerts(quotes: YQuote[]): { symbol: string; name: string; risk: string; level: 'high' | 'medium' }[] {
+  return quotes
+    .filter((q) => q.regularMarketPrice > 0)
+    .map((q) => {
+      const pe = q.trailingPE ?? 0;
+      const chg = q.regularMarketChangePercent ?? 0;
+      const high52 = q.fiftyTwoWeekHigh ?? 0;
+      const price = q.regularMarketPrice ?? 0;
+
+      const risks: string[] = [];
+      let level: 'high' | 'medium' = 'medium';
+
+      if (pe > 50) { risks.push('PE过高(>50)'); level = 'high'; }
+      if (chg < -3) { risks.push('近期跌幅较大'); level = 'high'; }
+      if (high52 > 0 && price > 0 && price > high52 * 0.95) { risks.push('接近52周高位'); }
+      if (pe < 0) { risks.push('亏损状态'); level = 'high'; }
+
+      return { symbol: q.symbol ?? '', name: (q.shortName ?? '').slice(0, 16), risk: risks.join('+') || '暂无显著风险信号', level };
+    })
+    .filter((r) => r.risk !== '暂无显著风险信号')
+    .sort((a, b) => (a.level === 'high' ? -1 : 1))
+    .slice(0, 10);
+}
+
+// Rule-based financial Q&A (works without API key)
+function localFinancialQA(question: string, quotes: YQuote[]): string {
+  const q = question.toLowerCase();
+  const valid = quotes.filter((s) => s.regularMarketPrice > 0);
+
+  // Market overview
+  if (q.includes('市场') && (q.includes('概览') || q.includes('整体') || q.includes('怎么样'))) {
+    const up = valid.filter((s) => (s.regularMarketChangePercent ?? 0) > 0).length;
+    const down = valid.filter((s) => (s.regularMarketChangePercent ?? 0) < 0).length;
+    const topGainer = [...valid].sort((a, b) => (b.regularMarketChangePercent ?? 0) - (a.regularMarketChangePercent ?? 0))[0];
+    return `当前扫描 ${valid.length} 只股票：上涨 ${up} 只，下跌 ${down} 只。领涨: ${topGainer?.symbol} (${topGainer?.shortName}) +${topGainer?.regularMarketChangePercent?.toFixed(2)}%。市场情绪${up > down ? '偏积极' : '偏谨慎'}。`;
+  }
+
+  // Best PE
+  if (q.includes('最低估') || q.includes('最低pe') || q.includes('便宜') || q.includes('价值')) {
+    const cheap = [...valid].filter((s) => (s.trailingPE ?? 0) > 0).sort((a, b) => (a.trailingPE ?? 99) - (b.trailingPE ?? 99)).slice(0, 5);
+    if (cheap.length === 0) return '当前暂无PE数据可供分析。';
+    return '最低PE（最具安全边际）股票：\n' + cheap.map((s) => `${s.symbol} ${s.shortName} PE:${s.trailingPE?.toFixed(1)}`).join('\n');
+  }
+
+  // Best momentum
+  if (q.includes('涨得') || q.includes('领涨') || q.includes('强势') || q.includes('涨幅')) {
+    const top = [...valid].sort((a, b) => (b.regularMarketChangePercent ?? 0) - (a.regularMarketChangePercent ?? 0)).slice(0, 5);
+    return '今日涨幅前5：\n' + top.map((s) => `${s.symbol} ${s.shortName} +${s.regularMarketChangePercent?.toFixed(2)}%`).join('\n');
+  }
+
+  // Worst performers
+  if (q.includes('跌') || q.includes('领跌') || q.includes('弱势') || q.includes('跌幅')) {
+    const worst = [...valid].sort((a, b) => (a.regularMarketChangePercent ?? 0) - (b.regularMarketChangePercent ?? 0)).slice(0, 5);
+    return '今日跌幅前5：\n' + worst.map((s) => `${s.symbol} ${s.shortName} ${s.regularMarketChangePercent?.toFixed(2)}%`).join('\n');
+  }
+
+  // High volume
+  if (q.includes('成交') || q.includes('放量') || q.includes('活跃')) {
+    const active = [...valid].sort((a, b) => (b.regularMarketVolume ?? 0) - (a.regularMarketVolume ?? 0)).slice(0, 5);
+    return '今日成交最活跃：\n' + active.map((s) => `${s.symbol} ${s.shortName} 成交量:${((s.regularMarketVolume ?? 0) / 10000).toFixed(0)}万`).join('\n');
+  }
+
+  // ETF specific
+  if (q.includes('etf') || q.includes('ETF') || q.includes('指数基金')) {
+    const etfs = ['SPY', 'QQQ', 'DIA', 'IWM', 'VTI', 'VOO', 'TQQQ', 'SQQQ', 'FXI', 'KWEB', 'GLD', 'TLT', 'XLK', 'XLF', 'XLE'];
+    const etfData = valid.filter((s) => etfs.includes(s.symbol ?? ''));
+    return 'ETF 行情概览：\n' + etfData.map((s) => `${s.symbol} ${s.shortName}: $${s.regularMarketPrice?.toFixed(2)} ${s.regularMarketChangePercent >= 0 ? '+' : ''}${s.regularMarketChangePercent?.toFixed(2)}%`).join('\n');
+  }
+
+  // Default: search specific stock
+  const mentioned = valid.filter((s) => question.toUpperCase().includes(s.symbol ?? ''));
+  if (mentioned.length > 0) {
+    const s = mentioned[0];
+    const pe = s.trailingPE;
+    const price = s.regularMarketPrice;
+    const chg = s.regularMarketChangePercent ?? 0;
+    const cap = s.marketCap ? (s.marketCap / 1e8).toFixed(0) : '---';
+    const high52 = s.fiftyTwoWeekHigh ?? 0;
+    const low52 = s.fiftyTwoWeekLow ?? 0;
+    let resp = `${s.symbol} ${s.shortName} 当前价: ${price?.toFixed(2)} | ${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%`;
+    if (pe && pe > 0) resp += `\nPE(TTM): ${pe.toFixed(1)} (${pe < 15 ? '低估' : pe < 25 ? '合理' : pe < 40 ? '偏高' : '高估'})`;
+    resp += `\n市值: ${cap}亿 | 52周区间: ${low52.toFixed(1)}-${high52.toFixed(1)}`;
+    return resp;
+  }
+
+  return `基于当前 ${valid.length} 只股票数据，我可以回答以下问题：\n• "市场整体怎么样？"\n• "哪些股票最低估？"\n• "今日领涨/领跌？"\n• "成交最活跃？"\n• "ETF行情？"\n• 输入具体股票代码查询（如 "00700" 或 "AAPL"）`;
+}
+
+export default function Screener() {
+  const { quotes, loading } = useQuotes(ALL_STOCKS_FULL, 60_000);
+  const [activeTab, setActiveTab] = useState('screener');
+
+  // ---- Screener state ----
   const [filters, setFilters] = useState<FilterCondition[]>([
     { id: 'changePct', name: '涨跌幅 %', enabled: false, min: '2', max: '20', field: 'regularMarketChangePercent' },
     { id: 'pe', name: 'PE(TTM)', enabled: false, min: '0', max: '30', field: 'trailingPE' },
@@ -23,17 +189,13 @@ export default function Screener() {
     { id: 'marketCap', name: '市值(亿)', enabled: false, min: '100', max: '', field: 'marketCap' },
     { id: 'market', name: '市场', enabled: false, min: '', max: '', field: 'exchangeName' as any },
   ]);
-
   const [marketSelect, setMarketSelect] = useState('ALL');
 
   const updateFilter = (id: string, changes: Partial<FilterCondition>) => {
     setFilters((prev) => prev.map((f) => (f.id === id ? { ...f, ...changes } : f)));
   };
-
   const toggleFilter = (id: string) => {
-    setFilters((prev) =>
-      prev.map((f) => (f.id === id ? { ...f, enabled: !f.enabled } : f))
-    );
+    setFilters((prev) => prev.map((f) => (f.id === id ? { ...f, enabled: !f.enabled } : f)));
   };
 
   const results = useMemo(() => {
@@ -42,26 +204,21 @@ export default function Screener() {
       const isHK = /^\d{5}$/.test(sym);
       if (marketSelect === 'HK' && !isHK) return false;
       if (marketSelect === 'US' && isHK) return false;
-
       for (const f of filters) {
         if (!f.enabled) continue;
-
-        if (f.id === 'market') continue; // handled above
-
+        if (f.id === 'market') continue;
         if (f.id === 'volume') {
-          const vol = (q.regularMarketVolume ?? 0) / 10000; // convert to 万
+          const vol = (q.regularMarketVolume ?? 0) / 10000;
           if (f.min && vol < Number(f.min)) return false;
           if (f.max && vol > Number(f.max)) return false;
           continue;
         }
-
         if (f.id === 'marketCap') {
-          const cap = (q.marketCap ?? 0) / 1e8; // convert to 亿
+          const cap = (q.marketCap ?? 0) / 1e8;
           if (f.min && cap < Number(f.min)) return false;
           if (f.max && cap > Number(f.max)) return false;
           continue;
         }
-
         const val = q[f.field] as number;
         if (val == null || val === 0) return false;
         if (f.min && val < Number(f.min)) return false;
@@ -71,173 +228,400 @@ export default function Screener() {
     });
   }, [quotes, filters, marketSelect]);
 
-  // Sort by change% desc by default
-  const sortedResults = useMemo(() => {
-    return [...results].sort((a, b) =>
-      (b.regularMarketChangePercent ?? 0) - (a.regularMarketChangePercent ?? 0)
-    );
-  }, [results]);
+  const sortedResults = useMemo(() => [...results].sort((a, b) => (b.regularMarketChangePercent ?? 0) - (a.regularMarketChangePercent ?? 0)), [results]);
+
+  // ---- AI Recommendations (real-time, based on full data) ----
+  const recommendations = useMemo(() => generateRecommendations(quotes), [quotes]);
+  const riskAlerts = useMemo(() => generateRiskAlerts(quotes), [quotes]);
+
+  // ---- AI Chat ----
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    { role: 'assistant', content: '你好！我是 Monn AI 助手。我可以基于实时数据回答股票相关问题。\n\n试着问我："市场整体怎么样？"、"哪些股票最低估？"、"ETF行情"、或输入股票代码。' },
+  ]);
+  const [chatInput, setChatInput] = useState('');
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem('monn-ai-apikey') || '');
+  const [apiUrl, setApiUrl] = useState(() => localStorage.getItem('monn-ai-apiurl') || 'https://api.openai.com/v1/chat/completions');
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
+
+  const sendMessage = async () => {
+    if (!chatInput.trim()) return;
+    const userMsg: ChatMessage = { role: 'user', content: chatInput.trim() };
+    setChatMessages((prev) => [...prev, userMsg]);
+    setChatInput('');
+
+    // Try remote AI model if API key is configured
+    if (apiKey.trim()) {
+      try {
+        const res = await fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({
+            model: 'gpt-3.5-turbo',
+            messages: [
+              { role: 'system', content: `你是一个专业的股票分析助手，可访问以下${quotes.filter(q => q.regularMarketPrice > 0).length}只港美股实时数据。简短回答，中文优先。` },
+              ...chatMessages.map((m) => ({ role: m.role, content: m.content })),
+              { role: 'user', content: userMsg.content },
+            ],
+            max_tokens: 500,
+            temperature: 0.7,
+          }),
+        });
+        const json = await res.json();
+        const reply = json?.choices?.[0]?.message?.content ?? 'AI 模型返回为空，请检查 API 配置。';
+        setChatMessages((prev) => [...prev, { role: 'assistant', content: reply }]);
+        return;
+      } catch {
+        // Fall through to local analysis on API failure
+      }
+    }
+
+    // Local rule-based analysis
+    await new Promise((r) => setTimeout(r, 500));
+    const reply = localFinancialQA(userMsg.content, quotes);
+    setChatMessages((prev) => [...prev, { role: 'assistant', content: reply }]);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  };
+
+  const saveApiConfig = () => {
+    localStorage.setItem('monn-ai-apikey', apiKey);
+    localStorage.setItem('monn-ai-apiurl', apiUrl);
+  };
 
   const enabledCount = filters.filter((f) => f.enabled).length;
 
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">智能选股</h1>
+        <h1 className="page-title">AI 智能选股</h1>
         <p className="page-desc">
-          {loading ? '加载数据中...' : `${quotes.filter(q => q.regularMarketPrice > 0).length} 只股票可用 · ${enabledCount} 个筛选条件`}
+          {loading ? '加载数据中...' : `条件筛选 · AI推荐 · AI问答 · ${quotes.filter(q => q.regularMarketPrice > 0).length} 只股票可用`}
         </p>
       </div>
 
       <div style={{ padding: '0 28px 20px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: '20px' }}>
-          {/* Left - Filters */}
-          <div>
-            <div className="card mb-4">
-              <div className="card-title mb-3">市场</div>
-              <div className="tabs" style={{ display: 'inline-flex' }}>
-                {['ALL', 'HK', 'US'].map((m) => (
-                  <button key={m} className={`tab ${marketSelect === m ? 'active' : ''}`}
-                    onClick={() => setMarketSelect(m)}>
-                    {{ ALL: '全部', HK: '港股', US: '美股' }[m]}
-                  </button>
+        {/* Tabs */}
+        <div className="tabs mb-4" style={{ display: 'inline-flex' }}>
+          {[
+            { key: 'screener', label: '条件筛选' },
+            { key: 'recommend', label: 'AI 推荐' },
+            { key: 'chat', label: 'AI 问答' },
+          ].map((t) => (
+            <button key={t.key} className={`tab ${activeTab === t.key ? 'active' : ''}`} onClick={() => setActiveTab(t.key)}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* ===== TAB: Screener ===== */}
+        {activeTab === 'screener' && (
+          <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: '20px' }}>
+            <div>
+              <div className="card mb-4">
+                <div className="card-title mb-3">市场</div>
+                <div className="tabs" style={{ display: 'inline-flex' }}>
+                  {['ALL', 'HK', 'US'].map((m) => (
+                    <button key={m} className={`tab ${marketSelect === m ? 'active' : ''}`} onClick={() => setMarketSelect(m)}>
+                      {{ ALL: '全部', HK: '港股', US: '美股' }[m]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="card mb-4">
+                <div className="card-title mb-4">筛选条件</div>
+                {filters.map((f) => (
+                  <div key={f.id} style={{ marginBottom: 12 }}>
+                    <div className="flex justify-between items-center" style={{ padding: '6px 0', cursor: 'pointer' }}
+                      onClick={() => toggleFilter(f.id)}>
+                      <span style={{ fontSize: '13px', fontWeight: f.enabled ? 600 : 400, color: f.enabled ? 'var(--color-accent)' : 'var(--text-secondary)' }}>
+                        {f.enabled ? '✓ ' : ''}{f.name}
+                      </span>
+                      <span style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>{f.enabled ? '启用' : '点击启用'}</span>
+                    </div>
+                    {f.enabled && f.id !== 'market' && (
+                      <div className="flex gap-2 mt-1">
+                        <input className="input" placeholder="最小" value={f.min}
+                          onChange={(e) => updateFilter(f.id, { min: e.target.value })}
+                          style={{ width: '50%', fontSize: '12px', padding: '4px 8px' }} />
+                        <input className="input" placeholder="最大" value={f.max}
+                          onChange={(e) => updateFilter(f.id, { max: e.target.value })}
+                          style={{ width: '50%', fontSize: '12px', padding: '4px 8px' }} />
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="card">
+                <div className="card-title mb-4">快捷方案</div>
+                {[
+                  { name: '低估值高成长', apply: () => {
+                    setMarketSelect('ALL');
+                    setFilters(filters.map((f) => {
+                      if (f.id === 'pe') return { ...f, enabled: true, min: '0', max: '20' };
+                      if (f.id === 'changePct') return { ...f, enabled: true, min: '2', max: '20' };
+                      return { ...f, enabled: false };
+                    }));
+                  }},
+                  { name: '超跌反弹', apply: () => {
+                    setMarketSelect('ALL');
+                    setFilters(filters.map((f) => {
+                      if (f.id === 'changePct') return { ...f, enabled: true, min: '-20', max: '-2' };
+                      if (f.id === 'volume') return { ...f, enabled: true, min: '500', max: '' };
+                      return { ...f, enabled: false };
+                    }));
+                  }},
+                  { name: '高成交活跃', apply: () => {
+                    setMarketSelect('ALL');
+                    setFilters(filters.map((f) => {
+                      if (f.id === 'volume') return { ...f, enabled: true, min: '1000', max: '' };
+                      if (f.id === 'price') return { ...f, enabled: true, min: '10', max: '1000' };
+                      return { ...f, enabled: false };
+                    }));
+                  }},
+                ].map((s) => (
+                  <div key={s.name} style={{ padding: '8px 0', borderBottom: '1px solid var(--border-subtle)', cursor: 'pointer' }}
+                    onClick={s.apply}>
+                    <div style={{ fontSize: '13px', fontWeight: 500 }}>{s.name}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: 2 }}>点击应用</div>
+                  </div>
                 ))}
               </div>
             </div>
 
-            <div className="card mb-4">
-              <div className="card-title mb-4">筛选条件</div>
-              {filters.map((f) => (
-                <div key={f.id} style={{ marginBottom: 12 }}>
-                  <div
-                    className="flex justify-between items-center"
-                    style={{ padding: '6px 0', cursor: 'pointer' }}
-                    onClick={() => toggleFilter(f.id)}
-                  >
-                    <span style={{ fontSize: '13px', fontWeight: f.enabled ? 600 : 400, color: f.enabled ? 'var(--color-accent)' : 'var(--text-secondary)' }}>
-                      {f.enabled ? '✓ ' : ''}{f.name}
-                    </span>
-                    <span style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>
-                      {f.enabled ? '启用' : '点击启用'}
-                    </span>
-                  </div>
-                  {f.enabled && f.id !== 'market' && (
-                    <div className="flex gap-2 mt-1">
-                      <input
-                        className="input"
-                        placeholder="最小"
-                        value={f.min}
-                        onChange={(e) => updateFilter(f.id, { min: e.target.value })}
-                        style={{ width: '50%', fontSize: '12px', padding: '4px 8px' }}
-                      />
-                      <input
-                        className="input"
-                        placeholder="最大"
-                        value={f.max}
-                        onChange={(e) => updateFilter(f.id, { max: e.target.value })}
-                        style={{ width: '50%', fontSize: '12px', padding: '4px 8px' }}
-                      />
-                    </div>
-                  )}
+            <div>
+              <div className="card">
+                <div className="card-header">
+                  <span className="card-title">选股结果 ({sortedResults.length})</span>
+                  <button className="btn btn-sm" onClick={() => {
+                    const csv = ['代码,名称,市场,最新价,涨跌幅%,PE,市值'];
+                    sortedResults.forEach((s: any) => {
+                      const sym = s.symbol ?? '';
+                      const name = (s.shortName ?? '').replace(/,/g, '');
+                      const isHK = /^\d{5}$/.test(sym);
+                      csv.push(`${sym},${name},${isHK ? 'HK' : 'US'},${s.regularMarketPrice ?? 0},${s.regularMarketChangePercent ?? 0},${s.trailingPE ?? ''},${s.marketCap ? s.marketCap / 1e8 : ''}`);
+                    });
+                    const blob = new Blob([csv.join('\n')], { type: 'text/csv' });
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob); a.download = 'screener_results.csv'; a.click();
+                  }}>导出CSV</button>
                 </div>
-              ))}
-            </div>
-
-            <div className="card">
-              <div className="card-title mb-4">快捷方案</div>
-              {[
-                { name: '低估值高成长', apply: () => {
-                  setMarketSelect('ALL');
-                  setFilters(filters.map((f) => {
-                    if (f.id === 'pe') return { ...f, enabled: true, min: '0', max: '20' };
-                    if (f.id === 'changePct') return { ...f, enabled: true, min: '2', max: '20' };
-                    return { ...f, enabled: false };
-                  }));
-                }},
-                { name: '超跌反弹', apply: () => {
-                  setMarketSelect('ALL');
-                  setFilters(filters.map((f) => {
-                    if (f.id === 'changePct') return { ...f, enabled: true, min: '-20', max: '-2' };
-                    if (f.id === 'volume') return { ...f, enabled: true, min: '500', max: '' };
-                    return { ...f, enabled: false };
-                  }));
-                }},
-                { name: '高成交活跃', apply: () => {
-                  setMarketSelect('ALL');
-                  setFilters(filters.map((f) => {
-                    if (f.id === 'volume') return { ...f, enabled: true, min: '1000', max: '' };
-                    if (f.id === 'price') return { ...f, enabled: true, min: '10', max: '1000' };
-                    return { ...f, enabled: false };
-                  }));
-                }},
-              ].map((s) => (
-                <div key={s.name} style={{ padding: '8px 0', borderBottom: '1px solid var(--border-subtle)', cursor: 'pointer' }}
-                  onClick={s.apply}>
-                  <div style={{ fontSize: '13px', fontWeight: 500 }}>{s.name}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: 2 }}>点击应用</div>
-                </div>
-              ))}
+                {loading ? (
+                  <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-tertiary)' }}>加载中...</div>
+                ) : (
+                  <table className="data-table">
+                    <thead><tr><th>代码</th><th>名称</th><th>市场</th><th>最新价</th><th>涨跌幅</th><th>PE</th><th>市值(亿)</th></tr></thead>
+                    <tbody>
+                      {sortedResults.slice(0, 100).map((s: any) => {
+                        const sym = s.symbol ?? '';
+                        const name = s.shortName ?? s.longName ?? '';
+                        const isHK = /^\d{5}$/.test(sym);
+                        return (
+                          <tr key={sym}>
+                            <td style={{ color: 'var(--color-accent)' }}>{sym}</td>
+                            <td>{(name ?? '').length > 20 ? (name ?? '').slice(0, 18) + '..' : name}</td>
+                            <td><span className="badge" style={{ background: isHK ? '#a371f722' : '#58a6ff22', color: isHK ? 'var(--color-purple)' : 'var(--color-accent)', fontSize: '10px' }}>{isHK ? 'HK' : 'US'}</span></td>
+                            <td className="font-mono">{(s.regularMarketPrice ?? 0).toFixed(2)}</td>
+                            <td className={(s.regularMarketChangePercent ?? 0) >= 0 ? 'color-up' : 'color-down'}>
+                              {(s.regularMarketChangePercent ?? 0) >= 0 ? '+' : ''}{(s.regularMarketChangePercent ?? 0).toFixed(2)}%
+                            </td>
+                            <td>{s.trailingPE?.toFixed(1) ?? '-'}</td>
+                            <td>{s.marketCap ? (s.marketCap / 1e8).toFixed(0) : '-'}</td>
+                          </tr>
+                        );
+                      })}
+                      {sortedResults.length === 0 && (
+                        <tr><td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-tertiary)' }}>没有符合条件的股票，请调整筛选条件</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                )}
+              </div>
             </div>
           </div>
+        )}
 
-          {/* Right - Results */}
+        {/* ===== TAB: AI Recommend ===== */}
+        {activeTab === 'recommend' && (
           <div>
-            <div className="card">
-              <div className="card-header">
-                <span className="card-title">选股结果 ({sortedResults.length})</span>
-                <button className="btn btn-sm" onClick={() => {
-                  const csv = ['代码,名称,市场,最新价,涨跌幅%,PE,市值'];
-                  sortedResults.forEach((s: any) => {
-                    const sym = s.symbol ?? '';
-                    const name = (s.shortName ?? '').replace(/,/g, '');
-                    const isHK = /^\d{5}$/.test(sym);
-                    const price = s.regularMarketPrice ?? 0;
-                    const chg = s.regularMarketChangePercent ?? 0;
-                    const pe = s.trailingPE ?? '';
-                    const cap = s.marketCap ? s.marketCap / 1e8 : '';
-                    csv.push(`${sym},${name},${isHK ? 'HK' : 'US'},${price},${chg},${pe},${cap}`);
-                  });
-                  const blob = new Blob([csv.join('\n')], { type: 'text/csv' });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url; a.download = 'screener_results.csv'; a.click();
-                }}>导出CSV</button>
+            {/* Market Stats */}
+            <div className="dashboard-grid fixed-3col mb-4">
+              <div className="card" style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>AI 综合评分</div>
+                <div className="stat-value" style={{ fontSize: '28px', marginTop: 8, color: 'var(--color-accent)' }}>
+                  {recommendations.length > 0 ? `${recommendations[0]?.score}分` : '---'}
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: 4 }}>最佳推荐</div>
               </div>
-              {loading ? (
-                <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-tertiary)' }}>加载中...</div>
+              <div className="card" style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>市场情绪</div>
+                <div className="stat-value" style={{ fontSize: '28px', marginTop: 8, color: (() => {
+                  const up = quotes.filter(s => (s.regularMarketChangePercent ?? 0) > 0).length;
+                  const down = quotes.filter(s => (s.regularMarketChangePercent ?? 0) < 0).length;
+                  return up > down ? 'var(--color-up)' : 'var(--color-down)';
+                })() }}>
+                  {(() => {
+                    const up = quotes.filter(s => (s.regularMarketChangePercent ?? 0) > 0).length;
+                    const down = quotes.filter(s => (s.regularMarketChangePercent ?? 0) < 0).length;
+                    return up > down ? '偏多 ↑' : '偏空 ↓';
+                  })()}
+                </div>
+              </div>
+              <div className="card" style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>风险信号</div>
+                <div className="stat-value" style={{ fontSize: '28px', marginTop: 8, color: riskAlerts.length > 0 ? 'var(--color-down)' : 'var(--color-up)' }}>
+                  {riskAlerts.length}只
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: 4 }}>{riskAlerts.length < 5 ? '风险可控' : '需关注'}</div>
+              </div>
+            </div>
+
+            {/* AI Recommendations */}
+            <div className="card mb-4">
+              <div className="card-title mb-4">AI 股票推荐（基于实时数据自动评分）</div>
+              <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: 12 }}>
+                评分维度：PE估值 + 市值规模 + 短期动量 + 安全性。满分100分，仅供参考。
+              </div>
+              {recommendations.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-tertiary)' }}>加载中...</div>
+              ) : (
+                <div style={{ display: 'grid', gap: '12px' }}>
+                  {recommendations.map((rec) => (
+                    <div key={rec.symbol} className="card" style={{ padding: '12px 16px' }}>
+                      <div className="flex justify-between items-start">
+                        <div className="flex gap-3 items-center">
+                          <span style={{ fontWeight: 700, fontSize: '16px', color: 'var(--color-accent)' }}>{rec.symbol}</span>
+                          <span style={{ fontSize: '13px' }}>{rec.name}</span>
+                          <span className="badge" style={{
+                            background: rec.score >= 80 ? 'var(--color-up-bg)' : rec.score >= 60 ? '#d2992222' : 'var(--bg-tertiary)',
+                            color: rec.score >= 80 ? 'var(--color-up)' : rec.score >= 60 ? 'var(--color-warning)' : 'var(--text-secondary)',
+                          }}>{rec.score}分</span>
+                        </div>
+                        <div className="flex gap-2">
+                          <span className="badge" style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}>{rec.style}</span>
+                          <span className="badge" style={{ background: 'var(--color-accent-bg)', color: 'var(--color-accent)' }}>风险: {rec.risk}</span>
+                        </div>
+                      </div>
+                      <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: 8 }}>
+                        {rec.reason}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Risk Alerts */}
+            <div className="card">
+              <div className="card-title mb-4">风险扫描 ({riskAlerts.length} 条信号)</div>
+              {riskAlerts.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 20, color: 'var(--text-tertiary)' }}>当前未检测到显著风险信号</div>
               ) : (
                 <table className="data-table">
-                  <thead>
-                    <tr><th>代码</th><th>名称</th><th>市场</th><th>最新价</th><th>涨跌幅</th><th>PE</th><th>市值(亿)</th></tr>
-                  </thead>
+                  <thead><tr><th>代码</th><th>名称</th><th>风险信号</th><th>等级</th></tr></thead>
                   <tbody>
-                    {sortedResults.slice(0, 100).map((s: any) => {
-                      const sym = s.symbol ?? '';
-                      const name = s.shortName ?? s.longName ?? '';
-                      const isHK = /^\d{5}$/.test(sym);
-                      return (
-                        <tr key={sym}>
-                          <td style={{ color: 'var(--color-accent)' }}>{sym}</td>
-                          <td>{(name ?? '').length > 20 ? (name ?? '').slice(0, 18) + '..' : name}</td>
-                          <td><span className="badge" style={{ background: isHK ? '#a371f722' : '#58a6ff22', color: isHK ? 'var(--color-purple)' : 'var(--color-accent)', fontSize: '10px' }}>{isHK ? 'HK' : 'US'}</span></td>
-                          <td className="font-mono">{(s.regularMarketPrice ?? 0).toFixed(2)}</td>
-                          <td className={(s.regularMarketChangePercent ?? 0) >= 0 ? 'color-up' : 'color-down'}>
-                            {(s.regularMarketChangePercent ?? 0) >= 0 ? '+' : ''}{(s.regularMarketChangePercent ?? 0).toFixed(2)}%
-                          </td>
-                          <td>{s.trailingPE?.toFixed(1) ?? '-'}</td>
-                          <td>{s.marketCap ? (s.marketCap / 1e8).toFixed(0) : '-'}</td>
-                        </tr>
-                      );
-                    })}
-                    {sortedResults.length === 0 && (
-                      <tr><td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-tertiary)' }}>没有符合条件的股票，请调整筛选条件</td></tr>
-                    )}
+                    {riskAlerts.map((r) => (
+                      <tr key={r.symbol}>
+                        <td style={{ color: 'var(--color-accent)' }}>{r.symbol}</td>
+                        <td>{r.name}</td>
+                        <td style={{ fontSize: '12px' }}>{r.risk}</td>
+                        <td><span className={`badge ${r.level === 'high' ? 'badge-down' : ''}`}
+                          style={r.level === 'medium' ? { background: 'var(--color-warning)', color: '#fff' } : {}}>
+                          {r.level === 'high' ? '高风险' : '中风险'}
+                        </span></td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               )}
+              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: 8 }}>
+                ⚠️ 风险评分基于 PE、涨跌幅、52周位置等定量指标，仅供参考不构成投资建议。
+              </div>
             </div>
           </div>
-        </div>
+        )}
+
+        {/* ===== TAB: AI Chat ===== */}
+        {activeTab === 'chat' && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: '20px' }}>
+            <div className="card" style={{ height: 'calc(100vh - 200px)', display: 'flex', flexDirection: 'column' }}>
+              <div className="card-title mb-3">AI 问答助手</div>
+              <div style={{ flex: 1, overflow: 'auto', marginBottom: 12, padding: '0 4px' }}>
+                {chatMessages.map((msg, i) => (
+                  <div key={i} style={{
+                    marginBottom: 12, padding: '8px 12px', borderRadius: 8,
+                    background: msg.role === 'user' ? 'var(--color-accent-bg)' : 'var(--bg-tertiary)',
+                    maxWidth: '90%', marginLeft: msg.role === 'user' ? 'auto' : 0,
+                    fontSize: '13px', lineHeight: 1.7, whiteSpace: 'pre-wrap',
+                  }}>
+                    {msg.content}
+                  </div>
+                ))}
+                <div ref={chatEndRef} />
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  className="input flex-1"
+                  placeholder={apiKey ? '已连接远程模型，输入问题...' : '输入问题，如"市场整体怎么样？"...'}
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  style={{ fontSize: '13px' }}
+                />
+                <button className="btn btn-primary" onClick={sendMessage}>发送</button>
+              </div>
+            </div>
+
+            <div>
+              <div className="card mb-4">
+                <div className="card-title mb-3">API 配置（可选）</div>
+                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: 12 }}>
+                  接入 OpenAI/Claude 等模型获得更智能的回答。不配置则使用本地规则引擎。
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <input className="input" placeholder="API URL" value={apiUrl}
+                    onChange={(e) => setApiUrl(e.target.value)} style={{ fontSize: '11px' }} />
+                  <input className="input" type="password" placeholder="API Key" value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)} style={{ fontSize: '11px' }} />
+                  <button className="btn btn-sm w-full" onClick={saveApiConfig}>保存配置</button>
+                </div>
+              </div>
+
+              <div className="card">
+                <div className="card-title mb-3">快捷提问</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {[
+                    '市场整体怎么样？',
+                    '哪些股票最低估？',
+                    '今日领涨前5',
+                    '今日成交最活跃',
+                    'ETF行情',
+                    '00700 分析',
+                    'AAPL 分析',
+                  ].map((q) => (
+                    <div key={q} style={{ padding: '6px 10px', cursor: 'pointer', borderRadius: 4, fontSize: '12px' }}
+                      className="sidebar-item"
+                      onClick={() => { setChatInput(q); }}>
+                      {q}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="card mt-4">
+                <div className="card-title mb-3">免责声明</div>
+                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', lineHeight: 1.6 }}>
+                  AI 回答基于规则和数据自动生成，不构成投资建议。投资有风险，决策需谨慎。
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

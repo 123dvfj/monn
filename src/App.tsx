@@ -9,7 +9,6 @@ import Screener from './pages/Screener';
 import News from './pages/News';
 import Tools from './pages/Tools';
 import Review from './pages/Review';
-import AIAnalysis from './pages/AIAnalysis';
 import { useT } from './i18n/I18nContext';
 
 export default function App() {
@@ -31,7 +30,6 @@ export default function App() {
           <Route path="/news" element={<News />} />
           <Route path="/tools" element={<Tools />} />
           <Route path="/review" element={<Review />} />
-          <Route path="/ai" element={<AIAnalysis />} />
         </Routes>
       </main>
     </div>

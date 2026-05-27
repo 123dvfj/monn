@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, TrendingUp, CandlestickChart, FileText,
-  Banknote, Search, Newspaper, Wrench, Clock, Bot, Globe,
+  Banknote, Search, Newspaper, Wrench, Clock, Globe,
 } from 'lucide-react';
 import { useT } from '../i18n/I18nContext';
 
@@ -35,7 +35,6 @@ export default function Sidebar() {
       items: [
         { path: '/screener', labelKey: 'smartScreener', icon: <Search size={16} /> },
         { path: '/news', labelKey: 'newsSentiment', icon: <Newspaper size={16} /> },
-        { path: '/ai', labelKey: 'aiAnalysis', icon: <Bot size={16} /> },
       ],
     },
     {
