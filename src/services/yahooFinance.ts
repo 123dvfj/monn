@@ -1,12 +1,18 @@
-// Use proxy in dev (Vite handles /api/yahoo/* -> Yahoo Finance)
-const isDev = typeof window !== 'undefined' && window.location.port === '5173';
-const BASE = isDev ? '' : 'https://query1.finance.yahoo.com';
-const BASE_NEWS = isDev ? '' : 'https://query2.finance.yahoo.com';
+// Yahoo Finance data service
+// Uses v8/finance/chart endpoint (v7/quote is blocked by Yahoo)
+// Proxy handled by Vite middleware in dev mode
 
-const QUOTE_URL = isDev ? '/api/yahoo/v7/finance/quote' : `${BASE}/v7/finance/quote`;
-const CHART_URL = isDev ? '/api/yahoo/v8/finance/chart' : `${BASE}/v8/finance/chart`;
-const SEARCH_URL = isDev ? '/api/yahoo/v1/finance/search' : `${BASE}/v1/finance/search`;
-const NEWS_URL = isDev ? '/api/yahoo-news/v1/finance/news' : `${BASE_NEWS}/v1/finance/news`;
+const isDev = typeof window !== 'undefined' && window.location.port === '5173';
+
+function apiUrl(path: string): string {
+  if (isDev) return `/api/yahoo${path}`;
+  return `https://query1.finance.yahoo.com${path}`;
+}
+
+function newsApiUrl(path: string): string {
+  if (isDev) return `/api/yahoo-news${path}`;
+  return `https://query2.finance.yahoo.com${path}`;
+}
 
 // ---- Symbol conversion ----
 const HK_MAP: Record<string, string> = {
@@ -14,8 +20,6 @@ const HK_MAP: Record<string, string> = {
   '00388': '0388.HK', '09618': '9618.HK', '01211': '1211.HK',
   '02269': '2269.HK', '00016': '0016.HK', '00005': '0005.HK',
   '02318': '2318.HK', '00941': '0941.HK', '03690': '3690.HK',
-  '09999': '9999.HK', '09626': '9626.HK', '09888': '9888.HK',
-  '02015': '2015.HK', '01024': '1024.HK', '09901': '9901.HK',
 };
 
 const INDEX_MAP: Record<string, string> = {
@@ -26,7 +30,6 @@ const INDEX_MAP: Record<string, string> = {
 export function toYahooSymbol(sym: string): string {
   if (INDEX_MAP[sym]) return INDEX_MAP[sym];
   if (HK_MAP[sym]) return HK_MAP[sym];
-  // Auto-detect HK stock: 5-digit code → 4-digit padded HK format
   if (/^\d{5}$/.test(sym)) {
     const num = parseInt(sym, 10);
     return `${String(num).padStart(4, '0')}.HK`;
@@ -37,7 +40,6 @@ export function toYahooSymbol(sym: string): string {
 function fromYahooSymbol(ys: string): string {
   for (const [k, v] of Object.entries(INDEX_MAP)) { if (v === ys) return k; }
   for (const [k, v] of Object.entries(HK_MAP)) { if (v === ys) return k; }
-  // Handle 4-digit.HK format → pad to 5-digit
   const m = ys.match(/^(\d{1,4})\.HK$/);
   if (m) return m[1].padStart(5, '0');
   return ys;
@@ -66,7 +68,6 @@ export interface YQuote {
   fiftyTwoWeekHigh?: number;
   fiftyTwoWeekLow?: number;
   averageDailyVolume3Month?: number;
-  market?: string;
   currency?: string;
   exchangeName?: string;
 }
@@ -93,25 +94,56 @@ export interface YNewsItem {
 
 async function yahooFetch<T>(url: string): Promise<T> {
   const res = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0',
-      'Accept': 'application/json',
-    },
+    headers: { 'Accept': 'application/json' },
   });
   if (!res.ok) throw new Error(`Yahoo API error: ${res.status}`);
   return res.json();
 }
 
+// Fetch quotes using v8/chart endpoint (v7/quote is blocked)
 export async function fetchQuotes(symbols: string[]): Promise<YQuote[]> {
-  const ySymbols = symbols.map(toYahooSymbol);
-  const data = await yahooFetch<any>(
-    `${QUOTE_URL}?symbols=${ySymbols.join(',')}&fields=regularMarketPrice,regularMarketChange,regularMarketChangePercent,regularMarketOpen,regularMarketDayHigh,regularMarketDayLow,regularMarketVolume,regularMarketPreviousClose,marketCap,trailingPE,forwardPE,bid,ask,bidSize,askSize,shortName,longName,fiftyTwoWeekHigh,fiftyTwoWeekLow,averageDailyVolume3Month,market,currency,exchangeName`
+  if (symbols.length === 0) return [];
+
+  // Fetch each symbol's 1d chart to get meta quote data
+  const results = await Promise.allSettled(
+    symbols.map(async (sym) => {
+      const ys = toYahooSymbol(sym);
+      const data = await yahooFetch<any>(apiUrl(`/v8/finance/chart/${encodeURIComponent(ys)}?range=1d&interval=5m`));
+      const meta = data?.chart?.result?.[0]?.meta;
+      if (!meta) return null;
+
+      const price = meta.regularMarketPrice ?? 0;
+      const prevClose = meta.previousClose ?? meta.chartPreviousClose ?? price;
+      const change = price - prevClose;
+      const changePct = prevClose > 0 ? (change / prevClose) * 100 : 0;
+
+      return {
+        symbol: fromYahooSymbol(meta.symbol ?? ys),
+        shortName: meta.shortName ?? meta.symbol ?? '',
+        longName: meta.longName ?? '',
+        regularMarketPrice: price,
+        regularMarketChange: change,
+        regularMarketChangePercent: changePct,
+        regularMarketOpen: meta.chartPreviousClose ?? prevClose,
+        regularMarketDayHigh: meta.regularMarketDayHigh ?? price,
+        regularMarketDayLow: meta.regularMarketDayLow ?? price,
+        regularMarketVolume: meta.regularMarketVolume ?? 0,
+        regularMarketPreviousClose: prevClose,
+        marketCap: meta.marketCap,
+        trailingPE: meta.trailingPE,
+        forwardPE: meta.forwardPE,
+        fiftyTwoWeekHigh: meta.fiftyTwoWeekHigh,
+        fiftyTwoWeekLow: meta.fiftyTwoWeekLow,
+        currency: meta.currency,
+        exchangeName: meta.exchangeName,
+      } as YQuote;
+    })
   );
-  const result = data?.quoteResponse?.result ?? [];
-  return result.map((r: any) => ({
-    ...r,
-    symbol: fromYahooSymbol(r.symbol ?? ''),
-  }));
+
+  return results
+    .filter((r): r is PromiseFulfilledResult<YQuote | null> => r.status === 'fulfilled')
+    .map((r) => r.value)
+    .filter((q): q is YQuote => q !== null && q.regularMarketPrice > 0);
 }
 
 export async function fetchChart(
@@ -121,10 +153,11 @@ export async function fetchChart(
 ): Promise<YCandle[]> {
   const ys = toYahooSymbol(symbol);
   const data = await yahooFetch<any>(
-    `${CHART_URL}/${encodeURIComponent(ys)}?range=${range}&interval=${interval}`
+    apiUrl(`/v8/finance/chart/${encodeURIComponent(ys)}?range=${range}&interval=${interval}`)
   );
   const result = data?.chart?.result?.[0];
   if (!result) return [];
+
   const timestamps: number[] = result.timestamp ?? [];
   const quote: any = result.indicators?.quote?.[0] ?? {};
   const opens: (number | null)[] = quote.open ?? [];
@@ -144,32 +177,36 @@ export async function fetchChart(
 }
 
 export async function searchStocks(query: string): Promise<YQuote[]> {
-  const data = await yahooFetch<any>(`${SEARCH_URL}?q=${encodeURIComponent(query)}&quotesCount=10`);
-  const quotes = data?.quotes ?? [];
-  return quotes
-    .filter((q: any) => q.quoteType === 'EQUITY' && (q.exchange === 'HKG' || q.exchange === 'NMS' || q.exchange === 'NYQ' || q.exchange === 'NCM' || q.exchange === 'NGM'))
-    .map((q: any) => ({
-      symbol: fromYahooSymbol(q.symbol ?? ''),
-      shortName: q.shortname ?? q.longname ?? '',
-      longName: q.longname ?? '',
-      regularMarketPrice: 0,
-      regularMarketChange: 0,
-      regularMarketChangePercent: 0,
-      regularMarketOpen: 0,
-      regularMarketDayHigh: 0,
-      regularMarketDayLow: 0,
-      regularMarketVolume: 0,
-      regularMarketPreviousClose: 0,
-      exchangeName: q.exchange,
-    }));
+  try {
+    const data = await yahooFetch<any>(apiUrl(`/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=10`));
+    const quotes = data?.quotes ?? [];
+    return quotes
+      .filter((q: any) => q.quoteType === 'EQUITY')
+      .map((q: any) => ({
+        symbol: fromYahooSymbol(q.symbol ?? ''),
+        shortName: q.shortname ?? q.longname ?? '',
+        longName: q.longname ?? '',
+        regularMarketPrice: 0,
+        regularMarketChange: 0,
+        regularMarketChangePercent: 0,
+        regularMarketOpen: 0,
+        regularMarketDayHigh: 0,
+        regularMarketDayLow: 0,
+        regularMarketVolume: 0,
+        regularMarketPreviousClose: 0,
+        exchangeName: q.exchange,
+      }));
+  } catch {
+    return [];
+  }
 }
 
 export async function fetchNews(symbols: string[] = [], count: number = 20): Promise<YNewsItem[]> {
-  const ys = symbols.map(toYahooSymbol);
-  const url = ys.length > 0
-    ? `${NEWS_URL}?symbols=${ys.join(',')}&count=${count}`
-    : `${NEWS_URL}?count=${count}`;
   try {
+    const ys = symbols.map(toYahooSymbol);
+    const url = ys.length > 0
+      ? newsApiUrl(`/v1/finance/news?symbols=${ys.join(',')}&count=${count}`)
+      : newsApiUrl(`/v1/finance/news?count=${count}`);
     const data = await yahooFetch<any>(url);
     return (data?.items ?? data?.result ?? []).slice(0, count).map((n: any) => ({
       title: n.title ?? '',
@@ -184,12 +221,12 @@ export async function fetchNews(symbols: string[] = [], count: number = 20): Pro
   }
 }
 
-// ---- Cache helper ----
+// ---- Cache ----
 const cache = new Map<string, { data: any; ts: number }>();
 const CACHE_TTL = {
-  quote: 15_000,   // 15s for quotes
-  chart: 300_000,  // 5min for chart
-  news: 120_000,   // 2min for news
+  quote: 30_000,
+  chart: 300_000,
+  news: 120_000,
 };
 
 export async function cachedFetch<T>(

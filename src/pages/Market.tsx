@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { createChart, ColorType, type IChartApi, type ISeriesApi, type CandlestickData, type HistogramData, type Time } from 'lightweight-charts';
-import { useQuotes, useChart, DEFAULT_HK_STOCKS, DEFAULT_US_STOCKS } from '../hooks/useStockData';
+import { useQuotes, useChart, ALL_HK_STOCKS, ALL_US_STOCKS } from '../hooks/useStockData';
 import { useSearch } from '../hooks/useStockData';
 import type { YQuote } from '../services/yahooFinance';
 
-const ALL_STOCKS = [...DEFAULT_HK_STOCKS, ...DEFAULT_US_STOCKS];
+const ALL_STOCKS = [...ALL_HK_STOCKS, ...ALL_US_STOCKS];
+// Initial load: popular stocks only to avoid rate limiting
+const INITIAL_STOCKS = [
+  ...ALL_HK_STOCKS.slice(0, 15),
+  ...ALL_US_STOCKS.slice(0, 15),
+];
 
 const PERIODS: { label: string; range: string; interval: string }[] = [
   { label: '1D', range: '1d', interval: '5m' },
@@ -28,12 +33,15 @@ export default function Market() {
   const [showSearch, setShowSearch] = useState(false);
   const [marketFilter, setMarketFilter] = useState<'ALL' | 'HK' | 'US'>('ALL');
   const [showAllStocks, setShowAllStocks] = useState(false);
+  const [fetchAll, setFetchAll] = useState(false);
 
-  const { quotes } = useQuotes(ALL_STOCKS, 30_000);
-  const { quotes: searchQuotes } = useQuotes(
-    ALL_STOCKS.filter((s) => s.includes(searchQuery.toUpperCase())),
-    60_000
-  );
+  // Only fetch full list when user expands, to avoid rate limiting
+  const fetchSymbols = fetchAll ? ALL_STOCKS : INITIAL_STOCKS;
+  const { quotes } = useQuotes(fetchSymbols, 60_000);
+  const searchSymbols = searchQuery
+    ? ALL_STOCKS.filter((s) => s.includes(searchQuery.toUpperCase())).slice(0, 20)
+    : [];
+  const { quotes: searchQuotes } = useQuotes(searchSymbols, 60_000);
   const { candles } = useChart(selectedSymbol, PERIODS[activePeriod].range, PERIODS[activePeriod].interval);
   const { search, results: searchResults, loading: searchLoading } = useSearch();
 
@@ -239,12 +247,13 @@ export default function Market() {
             })}
           </div>
 
-          {stockList.length > 20 && (
-            <button
-              className="btn btn-sm mt-3"
-              onClick={() => setShowAllStocks(!showAllStocks)}
-              style={{ width: '100%' }}
-            >
+          {!fetchAll ? (
+            <button className="btn btn-sm mt-3" style={{ width: '100%' }}
+              onClick={() => { setFetchAll(true); setShowAllStocks(true); }}>
+              加载全部 {ALL_STOCKS.length} 只股票 ▼
+            </button>
+          ) : stockList.length > 20 && (
+            <button className="btn btn-sm mt-3" onClick={() => setShowAllStocks(!showAllStocks)} style={{ width: '100%' }}>
               {showAllStocks ? '收起 ▲' : `展开全部 (${stockList.length} 只) ▼`}
             </button>
           )}
