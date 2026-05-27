@@ -1,86 +1,272 @@
-import { capitalFlow, chipDistribution } from '../utils/mockData';
+import { useState, useMemo } from 'react';
+import { useQuotes, ALL_HK_STOCKS, ALL_US_STOCKS } from '../hooks/useStockData';
+import type { YQuote } from '../services/yahooFinance';
+
+const ALL_STOCKS = [...ALL_HK_STOCKS, ...ALL_US_STOCKS];
+
+function generateFlowSummary(q: YQuote | undefined, symbol: string): string[] {
+  if (!q || !q.regularMarketPrice) return ['请先选择一只股票以生成资金面分析。'];
+  const isHK = /^\d{5}$/.test(symbol);
+  const price = q.regularMarketPrice;
+  const chgPct = q.regularMarketChangePercent ?? 0;
+  const vol = q.regularMarketVolume ?? 0;
+  const avgVol = q.averageDailyVolume3Month ?? 1;
+  const volRatio = avgVol > 0 ? vol / avgVol : 1;
+
+  const points: string[] = [];
+
+  // Volume analysis
+  if (volRatio > 2) {
+    points.push(`今日成交量是日均的 ${volRatio.toFixed(1)} 倍，出现极度放量，价格${chgPct >= 0 ? '上涨' : '下跌'} ${Math.abs(chgPct).toFixed(2)}%，资金参与度极高。`);
+  } else if (volRatio > 1.3) {
+    points.push(`今日成交量是日均的 ${volRatio.toFixed(1)} 倍，温和放量，${chgPct >= 0 ? '买盘积极性提升' : '抛压有所增加'}。`);
+  } else if (volRatio > 0.7) {
+    points.push(`今日成交量与日均持平（${volRatio.toFixed(1)}x），市场情绪平稳，资金以存量博弈为主。`);
+  } else {
+    points.push(`今日成交量仅为日均的 ${(volRatio * 100).toFixed(0)}%，交投清淡，市场关注度较低。`);
+  }
+
+  // Price momentum
+  if (chgPct > 3) {
+    points.push(`涨幅 ${chgPct.toFixed(2)}%，强势拉升信号，需关注后续量能能否持续。若缩量上涨则需警惕冲高回落。`);
+  } else if (chgPct < -3) {
+    points.push(`跌幅 ${Math.abs(chgPct).toFixed(2)}%，资金流出明显${volRatio > 1.5 ? '，放量下跌需警惕进一步下行风险' : ''}。`);
+  } else if (Math.abs(chgPct) < 0.5) {
+    points.push(`价格波动极小（${chgPct.toFixed(2)}%），多空力量均衡，资金呈观望态度。`);
+  }
+
+  // Bid/Ask
+  if (q.bid != null && q.ask != null) {
+    const spread = q.ask - q.bid;
+    const spreadPct = (spread / price) * 100;
+    points.push(`当前买盘 ${q.bid.toFixed(2)} / 卖盘 ${q.ask.toFixed(2)}，价差 ${spread.toFixed(2)}（${spreadPct.toFixed(2)}%），流动性${spreadPct < 0.1 ? '良好' : '一般'}。`);
+  }
+
+  // Market cap context
+  const cap = q.marketCap ?? 0;
+  const capDesc = cap > 1e12 ? '超大盘' : cap > 1e11 ? '大盘' : cap > 1e10 ? '中盘' : '小盘';
+  points.push(`${capDesc}标的，${isHK ? '港股' : '美股'}市场，${isHK ? '南向资金活跃度影响整体估值水平' : '机构资金主导定价权'}。`);
+
+  points.push('⚠️ 港美股无类似A股的"主力资金/北向资金"数据，以上基于量价关系推断，仅供参考。');
+
+  return points;
+}
 
 export default function Capital() {
+  const [symbol, setSymbol] = useState('00700');
+  const [searchText, setSearchText] = useState('');
+  const [showDropdown, setShowDropdown] = useState(false);
+
+  const stockList = useMemo(() => {
+    if (!searchText.trim()) return ALL_STOCKS;
+    const kw = searchText.toUpperCase();
+    return ALL_STOCKS.filter((s) => s.includes(kw)).slice(0, 30);
+  }, [searchText]);
+
+  const { quotes } = useQuotes([symbol], 60_000);
+  const q = quotes.find((x) => x.symbol === symbol);
+  const isHK = /^\d{5}$/.test(symbol);
+
+  const price = q?.regularMarketPrice ?? 0;
+  const chgPct = q?.regularMarketChangePercent ?? 0;
+  const vol = q?.regularMarketVolume ?? 0;
+  const avgVol = q?.averageDailyVolume3Month ?? 0;
+  const volRatio = avgVol > 0 ? vol / avgVol : 1;
+  const dayHigh = q?.regularMarketDayHigh ?? price;
+  const dayLow = q?.regularMarketDayLow ?? price;
+  const dayRange = dayHigh - dayLow;
+  const posInDay = dayRange > 0 ? ((price - dayLow) / dayRange) * 100 : 50;
+
+  const aiPoints = useMemo(() => generateFlowSummary(q, symbol), [q, symbol]);
+
+  const selectStock = (sym: string) => {
+    setSymbol(sym);
+    setSearchText('');
+    setShowDropdown(false);
+  };
+
   return (
     <div>
       <div className="page-header">
         <h1 className="page-title">资金筹码</h1>
-        <p className="page-desc">主力资金 · 龙虎榜 · 北向资金 · 筹码分布</p>
+        <p className="page-desc">量价关系 · 盘口数据 · 成交量分析 · AI 资金面研判</p>
       </div>
 
       <div style={{ padding: '0 28px 20px' }}>
-        {/* Capital Flow Summary */}
-        <div className="dashboard-grid fixed-3col mb-4">
-          <div className="card" style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>主力净流入</div>
-            <div className="stat-value color-up" style={{ fontSize: '28px', marginTop: 8 }}>+{capitalFlow.mainInflow}亿</div>
-          </div>
-          <div className="card" style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>大单买入 vs 卖出</div>
-            <div className="flex justify-between mt-2" style={{ padding: '0 16px' }}>
-              <div><span className="stat-value color-up" style={{ fontSize: '20px' }}>{capitalFlow.bigOrderBuy}</span><div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>买入(手)</div></div>
-              <div><span className="stat-value color-down" style={{ fontSize: '20px' }}>{capitalFlow.bigOrderSell}</span><div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>卖出(手)</div></div>
-            </div>
-          </div>
-          <div className="card" style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>北向资金净流入</div>
-            <div className="stat-value color-up" style={{ fontSize: '28px', marginTop: 8 }}>+{capitalFlow.northBound}亿</div>
-          </div>
-        </div>
-
-        {/* Fund Flow Detail */}
-        <div className="card mb-4">
-          <div className="card-title mb-4">资金流向（按单量拆分）</div>
-          <div style={{ display: 'flex', gap: '24px', alignItems: 'center' }}>
-            <div style={{ flex: 1 }}>
-              {[
-                { label: '超大单', inflow: 1.85, outflow: 1.20 },
-                { label: '大单', inflow: 0.85, outflow: 0.60 },
-                { label: '中单', inflow: 0.45, outflow: 0.55 },
-                { label: '小单', inflow: 0.30, outflow: 0.40 },
-              ].map((item) => (
-                <div key={item.label} className="flex items-center gap-3 mb-3">
-                  <span style={{ width: 50, fontSize: '12px', color: 'var(--text-secondary)' }}>{item.label}</span>
-                  <div style={{ flex: 1, height: 20, background: 'var(--bg-tertiary)', borderRadius: 4, overflow: 'hidden', display: 'flex' }}>
-                    <div style={{ width: `${(item.inflow / 2.5) * 100}%`, background: 'var(--color-up)', opacity: 0.7, transition: 'width 0.3s' }} />
-                    <div style={{ flex: 1 }} />
-                  </div>
-                  <span style={{ width: 50, textAlign: 'right', fontSize: '12px', color: 'var(--color-up)' }}>+{item.inflow}亿</span>
-                </div>
-              ))}
-            </div>
+        {/* Stock Selector */}
+        <div className="card mb-4" style={{ padding: '12px 16px' }}>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', position: 'relative' }}>
+            <span style={{ fontSize: '13px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>选择股票：</span>
+            <input
+              className="input"
+              placeholder="输入代码搜索..."
+              value={searchText}
+              onChange={(e) => { setSearchText(e.target.value); setShowDropdown(true); }}
+              onFocus={() => setShowDropdown(true)}
+              style={{ width: 260, fontSize: '13px' }}
+            />
+            {q && (
+              <span style={{ fontSize: '14px', fontWeight: 600 }}>
+                {symbol} <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>{q.shortName ?? ''}</span>
+                <span style={{ marginLeft: 12 }}>{price.toFixed(2)}</span>
+                <span className={chgPct >= 0 ? 'color-up' : 'color-down'} style={{ fontSize: '13px', marginLeft: 8 }}>
+                  {chgPct >= 0 ? '+' : ''}{chgPct.toFixed(2)}%
+                </span>
+              </span>
+            )}
+            {showDropdown && searchText && (
+              <div style={{
+                position: 'absolute', top: '100%', left: 80, width: 260,
+                background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)',
+                borderRadius: 'var(--radius-sm)', zIndex: 100, maxHeight: 250, overflow: 'auto',
+              }}>
+                {stockList.map((s) => (
+                  <div key={s} onClick={() => selectStock(s)}
+                    style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '13px', fontFamily: 'monospace' }}
+                    className="sidebar-item">{s}</div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Chip Distribution */}
-        <div className="card mb-4">
-          <div className="card-title mb-4">筹码分布图</div>
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: '4px', height: 180, paddingLeft: 40 }}>
-            {chipDistribution.map((chip) => (
-              <div key={chip.price} style={{ flex: 1, textAlign: 'center' }}>
-                <div style={{
-                  height: `${(chip.volume / 120000) * 100}%`,
-                  background: chip.price >= 395 ? 'var(--color-down)' : 'var(--color-up)',
-                  opacity: 0.6,
-                  borderRadius: '2px 2px 0 0',
-                  minWidth: 20,
-                }} />
-                <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginTop: 4, transform: 'rotate(-45deg)' }}>
-                  {chip.price}
-                </div>
+        {/* AI Flow Summary */}
+        <div className="card mb-4" style={{ borderLeft: '3px solid var(--color-warning)' }}>
+          <div className="card-title mb-3" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>AI 资金面分析</span>
+            <span className="badge" style={{ background: '#d2992222', color: 'var(--color-warning)', fontSize: '10px' }}>量价推断</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {aiPoints.map((point, i) => (
+              <div key={i} style={{ fontSize: '13px', color: i === aiPoints.length - 1 ? 'var(--text-tertiary)' : 'var(--text-primary)', lineHeight: 1.7 }}>
+                {point}
               </div>
             ))}
           </div>
-          <div className="flex justify-between mt-4" style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
-            <span>获利盘: 65%</span>
-            <span>平均成本: 392.50</span>
-            <span>集中度: 中等</span>
+        </div>
+
+        {/* Key Metrics Cards */}
+        <div className="dashboard-grid fixed-3col mb-4">
+          <div className="card" style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>成交量 vs 日均</div>
+            <div className="stat-value" style={{ fontSize: '28px', marginTop: 8, color: volRatio > 1.5 ? 'var(--color-up)' : volRatio < 0.5 ? 'var(--color-down)' : 'var(--text-primary)' }}>
+              {volRatio.toFixed(1)}x
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: 4 }}>
+              当日 {(vol / 10000).toFixed(0)}万 / 日均 {(avgVol / 10000).toFixed(0)}万
+            </div>
+          </div>
+          <div className="card" style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>日内价格位置</div>
+            <div style={{ marginTop: 8, height: 8, background: 'linear-gradient(90deg, var(--color-down), var(--color-warning), var(--color-up))', borderRadius: 4, position: 'relative' }}>
+              <div style={{ position: 'absolute', left: `${posInDay}%`, top: -4, width: 16, height: 16, background: '#fff', borderRadius: '50%', border: '2px solid var(--color-accent)', transform: 'translateX(-50%)' }} />
+            </div>
+            <div className="flex justify-between mt-2" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+              <span>低 {dayLow.toFixed(2)}</span>
+              <span>高 {dayHigh.toFixed(2)}</span>
+            </div>
+          </div>
+          <div className="card" style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>量价配合信号</div>
+            <div className="stat-value" style={{ fontSize: '24px', marginTop: 8, color: chgPct > 0 && volRatio > 1.2 ? 'var(--color-up)' : chgPct < 0 && volRatio > 1.2 ? 'var(--color-down)' : 'var(--text-secondary)' }}>
+              {chgPct > 0 && volRatio > 1.2 ? '放量上涨 ▲' :
+               chgPct < 0 && volRatio > 1.2 ? '放量下跌 ▼' :
+               chgPct > 0 && volRatio < 0.7 ? '缩量上涨 ↗' :
+               chgPct < 0 && volRatio < 0.7 ? '缩量下跌 ↘' : '量价均衡 —'}
+            </div>
           </div>
         </div>
 
-        {/* Dragon & Tiger List */}
+        {/* Volume Analysis */}
+        <div className="card mb-4">
+          <div className="card-title mb-4">成交量分析</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {[
+              { label: '当日成交量', value: vol > 0 ? `${(vol / 10000).toFixed(0)}万` : '---',
+                bar: Math.min(100, volRatio * 33), color: 'var(--color-accent)' },
+              { label: '日均成交量(3M)', value: avgVol > 0 ? `${(avgVol / 10000).toFixed(0)}万` : '---',
+                bar: 33, color: 'var(--text-tertiary)' },
+            ].map((item) => (
+              <div key={item.label} className="flex items-center gap-3">
+                <span style={{ width: 120, fontSize: '13px', color: 'var(--text-secondary)' }}>{item.label}</span>
+                <div style={{ flex: 1, height: 24, background: 'var(--bg-tertiary)', borderRadius: 4, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${item.bar}%`, background: item.color, opacity: 0.7, borderRadius: 4, transition: 'width 0.3s' }} />
+                </div>
+                <span style={{ width: 80, textAlign: 'right', fontSize: '13px', fontWeight: 600 }}>{item.value}</span>
+              </div>
+            ))}
+          </div>
+          {volRatio > 2 && (
+            <div style={{ marginTop: 12, padding: '8px 12px', background: 'var(--color-up-bg)', borderRadius: 4, fontSize: '12px', color: 'var(--color-up)' }}>
+              成交量异常放大（{volRatio.toFixed(1)}x），可能受事件驱动，建议关注相关公告或新闻。
+            </div>
+          )}
+          {volRatio < 0.3 && avgVol > 0 && (
+            <div style={{ marginTop: 12, padding: '8px 12px', background: 'var(--bg-tertiary)', borderRadius: 4, fontSize: '12px', color: 'var(--text-tertiary)' }}>
+              成交量极度萎缩（{volRatio.toFixed(1)}x），市场参与度低，可能是盘整蓄力期。
+            </div>
+          )}
+        </div>
+
+        {/* Bid/Ask + Volume bar */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: 16 }}>
+          {/* Bid/Ask */}
+          <div className="card">
+            <div className="card-title mb-4">盘口数据</div>
+            {q?.bid != null || q?.ask != null ? (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <div style={{ textAlign: 'center', flex: 1 }}>
+                    <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>买一价</div>
+                    <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--color-up)' }}>{q.bid?.toFixed(2) ?? '---'}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>量: {q.bidSize ? `${(q.bidSize / 100).toFixed(0)}手` : '---'}</div>
+                  </div>
+                  <div style={{ textAlign: 'center', flex: 1 }}>
+                    <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>卖一价</div>
+                    <div style={{ fontSize: '20px', fontWeight: 700, color: 'var(--color-down)' }}>{q.ask?.toFixed(2) ?? '---'}</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>量: {q.askSize ? `${(q.askSize / 100).toFixed(0)}手` : '---'}</div>
+                  </div>
+                </div>
+                {q.bid != null && q.ask != null && (
+                  <div style={{ textAlign: 'center', fontSize: '12px', color: 'var(--text-tertiary)' }}>
+                    买卖价差: {(q.ask - q.bid).toFixed(2)} ({(((q.ask - q.bid) / price) * 100).toFixed(3)}%)
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-tertiary)', fontSize: '13px' }}>
+                {isHK ? '港股暂无实时盘口数据' : '暂无盘口数据（可能非交易时段）'}
+              </div>
+            )}
+          </div>
+
+          {/* Volume Anomaly Detection */}
+          <div className="card">
+            <div className="card-title mb-4">成交量异常评分</div>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: '40px', fontWeight: 700, color: volRatio > 2 ? 'var(--color-up)' : volRatio > 1.3 ? 'var(--color-warning)' : 'var(--text-secondary)' }}>
+                {volRatio > 3 ? '🔥' : volRatio > 2 ? '▲' : volRatio > 1.3 ? '▶' : '—'}
+              </div>
+              <div style={{ fontSize: '14px', marginTop: 8 }}>
+                {volRatio > 3 ? '极度活跃' : volRatio > 2 ? '显著放量' : volRatio > 1.3 ? '温和放量' : volRatio > 0.5 ? '正常交投' : '极度冷清'}
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: 12 }}>
+                量比: <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{volRatio.toFixed(2)}x</span>
+                &nbsp;|&nbsp;
+                换手估算: <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                  {q?.marketCap ? `${((vol * price / q.marketCap) * 100).toFixed(3)}%` : '---'}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Dragon & Tiger List — Reference Only */}
         <div className="card">
-          <div className="card-title mb-4">龙虎榜</div>
+          <div className="card-title mb-4">龙虎榜（参考）</div>
+          <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: 12 }}>
+            ⚠️ 龙虎榜为中国A股特有机制，港美股无此制度。以下为示例数据，仅供了解概念。
+          </div>
           <table className="data-table">
             <thead>
               <tr><th>个股</th><th>上榜原因</th><th>买入前五</th><th>卖出前五</th><th>净买入</th></tr>
