@@ -43,9 +43,12 @@ function yahooProxyPlugin(): Plugin {
     let path = req.url ?? '/';
     if (rewritePath) path = rewritePath(path);
 
+    // Append crumb to query string if available
+    const separator = path.includes('?') ? '&' : '?';
+    const crumbParam = crumb ? `${separator}crumb=${crumb}` : '';
     const options: https.RequestOptions = {
       hostname: targetHost,
-      path: path,
+      path: path + crumbParam,
       method: req.method,
       headers: {
         Cookie: cookie,

@@ -1,9 +1,19 @@
-import { useState } from 'react';
-import { useNews } from '../hooks/useStockData';
+import { useState, useMemo } from 'react';
+import { useNews, ALL_HK_STOCKS, ALL_US_STOCKS } from '../hooks/useStockData';
 
 export default function News() {
-  const [filter, setFilter] = useState('all');
-  const { news, loading } = useNews();
+  const [keyword, setKeyword] = useState('');
+  const { news, loading } = useNews([...ALL_HK_STOCKS, ...ALL_US_STOCKS].slice(0, 20));
+
+  const filteredNews = useMemo(() => {
+    if (!keyword.trim()) return news;
+    const kw = keyword.toLowerCase();
+    return news.filter((n) =>
+      n.title.toLowerCase().includes(kw) ||
+      (n.summary ?? '').toLowerCase().includes(kw) ||
+      (n.publisher ?? '').toLowerCase().includes(kw)
+    );
+  }, [news, keyword]);
 
   return (
     <div>
@@ -17,7 +27,16 @@ export default function News() {
           {/* Main News Feed */}
           <div>
             <div className="flex gap-2 mb-4">
-              <input className="input" placeholder="搜索新闻关键词..." style={{ width: 220 }} />
+              <input
+                className="input"
+                placeholder="搜索新闻关键词..."
+                style={{ width: 220 }}
+                value={keyword}
+                onChange={(e) => setKeyword(e.target.value)}
+              />
+              {keyword && (
+                <button className="btn btn-sm" onClick={() => setKeyword('')}>清除</button>
+              )}
             </div>
 
             <div className="card">
@@ -25,12 +44,12 @@ export default function News() {
                 <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-tertiary)' }}>
                   正在加载 Yahoo Finance 新闻...
                 </div>
-              ) : news.length === 0 ? (
+              ) : filteredNews.length === 0 ? (
                 <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-tertiary)' }}>
-                  暂无新闻数据
+                  {keyword ? '没有匹配的新闻' : '暂无新闻数据'}
                 </div>
               ) : (
-                news.map((n, i) => (
+                filteredNews.map((n, i) => (
                   <a
                     key={i}
                     href={n.link}

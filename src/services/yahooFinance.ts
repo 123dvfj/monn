@@ -124,7 +124,7 @@ export async function fetchQuotes(symbols: string[]): Promise<YQuote[]> {
         regularMarketPrice: price,
         regularMarketChange: change,
         regularMarketChangePercent: changePct,
-        regularMarketOpen: meta.chartPreviousClose ?? prevClose,
+        regularMarketOpen: meta.regularMarketOpen ?? prevClose,
         regularMarketDayHigh: meta.regularMarketDayHigh ?? price,
         regularMarketDayLow: meta.regularMarketDayLow ?? price,
         regularMarketVolume: meta.regularMarketVolume ?? 0,
