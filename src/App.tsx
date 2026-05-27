@@ -10,12 +10,14 @@ import News from './pages/News';
 import Tools from './pages/Tools';
 import Review from './pages/Review';
 import AIAnalysis from './pages/AIAnalysis';
+import { useT } from './i18n/I18nContext';
 
 export default function App() {
+  const { t } = useT();
   return (
     <div className="app-layout">
       <div className="titlebar">
-        <span className="titlebar-title">Monn Stock Analyzer</span>
+        <span className="titlebar-title">{t('appTitle')}</span>
       </div>
       <Sidebar />
       <main className="main-content">

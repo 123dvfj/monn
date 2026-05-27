@@ -17,5 +17,31 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    proxy: {
+      '/api/yahoo/v7': {
+        target: 'https://query1.finance.yahoo.com',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/api\/yahoo/, ''),
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+      },
+      '/api/yahoo/v8': {
+        target: 'https://query1.finance.yahoo.com',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/api\/yahoo/, ''),
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+      },
+      '/api/yahoo/v1': {
+        target: 'https://query1.finance.yahoo.com',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/api\/yahoo/, ''),
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+      },
+      '/api/yahoo-news': {
+        target: 'https://query2.finance.yahoo.com',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/api\/yahoo-news/, ''),
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+      },
+    },
   },
 });

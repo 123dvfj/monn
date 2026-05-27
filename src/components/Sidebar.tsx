@@ -1,49 +1,52 @@
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, TrendingUp, CandlestickChart, FileText,
-  Banknote, Search, Newspaper, Wrench, Clock, Bot,
+  Banknote, Search, Newspaper, Wrench, Clock, Bot, Globe,
 } from 'lucide-react';
+import { useT } from '../i18n/I18nContext';
 
 interface NavItem {
   path: string;
-  label: string;
+  labelKey: keyof typeof import('../i18n/translations').zh;
   icon: React.ReactNode;
 }
 
-const sections: { title: string; items: NavItem[] }[] = [
-  {
-    title: '概览',
-    items: [
-      { path: '/', label: '工作台', icon: <LayoutDashboard size={16} /> },
-    ],
-  },
-  {
-    title: '行情分析',
-    items: [
-      { path: '/market', label: '实时行情', icon: <TrendingUp size={16} /> },
-      { path: '/technical', label: '技术分析', icon: <CandlestickChart size={16} /> },
-      { path: '/fundamental', label: '基本面', icon: <FileText size={16} /> },
-      { path: '/capital', label: '资金筹码', icon: <Banknote size={16} /> },
-    ],
-  },
-  {
-    title: '决策辅助',
-    items: [
-      { path: '/screener', label: '智能选股', icon: <Search size={16} /> },
-      { path: '/news', label: '资讯舆情', icon: <Newspaper size={16} /> },
-      { path: '/ai', label: 'AI 分析', icon: <Bot size={16} /> },
-    ],
-  },
-  {
-    title: '工具',
-    items: [
-      { path: '/tools', label: '辅助工具', icon: <Wrench size={16} /> },
-      { path: '/review', label: '复盘统计', icon: <Clock size={16} /> },
-    ],
-  },
-];
-
 export default function Sidebar() {
+  const { t, lang, toggleLang } = useT();
+
+  const sections: { titleKey: NavItem['labelKey']; items: NavItem[] }[] = [
+    {
+      titleKey: 'overview',
+      items: [
+        { path: '/', labelKey: 'dashboard', icon: <LayoutDashboard size={16} /> },
+      ],
+    },
+    {
+      titleKey: 'marketAnalysis',
+      items: [
+        { path: '/market', labelKey: 'realtimeMarket', icon: <TrendingUp size={16} /> },
+        { path: '/technical', labelKey: 'technicalAnalysis', icon: <CandlestickChart size={16} /> },
+        { path: '/fundamental', labelKey: 'fundamental', icon: <FileText size={16} /> },
+        { path: '/capital', labelKey: 'capitalFlow', icon: <Banknote size={16} /> },
+      ],
+    },
+    {
+      titleKey: 'decisionAid',
+      items: [
+        { path: '/screener', labelKey: 'smartScreener', icon: <Search size={16} /> },
+        { path: '/news', labelKey: 'newsSentiment', icon: <Newspaper size={16} /> },
+        { path: '/ai', labelKey: 'aiAnalysis', icon: <Bot size={16} /> },
+      ],
+    },
+    {
+      titleKey: 'tools',
+      items: [
+        { path: '/tools', labelKey: 'auxTools', icon: <Wrench size={16} /> },
+        { path: '/review', labelKey: 'reviewStats', icon: <Clock size={16} /> },
+      ],
+    },
+  ];
+
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
@@ -52,8 +55,8 @@ export default function Sidebar() {
       </div>
 
       {sections.map((section) => (
-        <div className="sidebar-section" key={section.title}>
-          <div className="sidebar-section-title">{section.title}</div>
+        <div className="sidebar-section" key={section.titleKey}>
+          <div className="sidebar-section-title">{t(section.titleKey)}</div>
           {section.items.map((item) => (
             <NavLink
               key={item.path}
@@ -64,15 +67,24 @@ export default function Sidebar() {
               }
             >
               <span className="sidebar-item-icon">{item.icon}</span>
-              {item.label}
+              {t(item.labelKey)}
             </NavLink>
           ))}
         </div>
       ))}
 
-      <div style={{ marginTop: 'auto', padding: '16px 12px' }}>
-        <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-          Monn v1.1.0
+      {/* Language Toggle */}
+      <div style={{ marginTop: 'auto', padding: '12px' }}>
+        <button
+          className="btn btn-sm w-full"
+          onClick={toggleLang}
+          style={{ justifyContent: 'center', gap: 8 }}
+        >
+          <Globe size={14} />
+          {lang === 'zh' ? 'English' : '中文'}
+        </button>
+        <div className="text-xs" style={{ color: 'var(--text-tertiary)', textAlign: 'center', marginTop: 8 }}>
+          {t('appVersion')}
         </div>
       </div>
     </aside>

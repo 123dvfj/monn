@@ -6,8 +6,66 @@ import {
 
 // ---- Key stock pools ----
 export const INDEX_SYMBOLS = ['HSI', 'HSCEI', 'HSTECH', 'DJI', 'IXIC', 'SPX'];
-export const DEFAULT_HK_STOCKS = ['00700', '09988', '01810', '00388', '09618', '01211', '02269', '03690', '09999', '01024'];
-export const DEFAULT_US_STOCKS = ['AAPL', 'NVDA', 'MSFT', 'TSLA', 'GOOGL', 'AMZN', 'META', 'AMD', 'NFLX', 'BABA'];
+
+export const ALL_HK_STOCKS = [
+  // Tech & Internet
+  '00700', '09988', '01810', '03690', '09999', '09618', '01024', '09888', '09901', '09626',
+  '02015', '06618', '00780', '00670', '06186', '03888', '00772', '00823',
+  // Finance
+  '00388', '01299', '02318', '02628', '01398', '03988', '00939', '00005', '00011', '02388',
+  '01658', '06818', '06030', '03968',
+  // Property
+  '00016', '01109', '00688', '00823', '00012', '00017', '00883',
+  // Energy & Resources
+  '00883', '00857', '00386', '01088', '01171', '01898',
+  // Consumer & Retail
+  '09633', '02020', '09688', '02331', '01929', '06110', '09698', '01876',
+  // Healthcare
+  '02269', '01177', '01801', '06098', '00992', '02196',
+  // Auto & New Energy
+  '01211', '09868', '02015', '09863', '00175', '02238', '01268',
+  // Industrial
+  '00316', '02382', '00669', '02018', '01347',
+  // Infrastructure
+  '00002', '00003', '00006', '00066', '00267',
+  // Others
+  '00027', '01928', '06862', '09987', '02518',
+];
+
+export const ALL_US_STOCKS = [
+  // Big Tech (Magnificent 7)
+  'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA',
+  // Semiconductors
+  'AMD', 'INTC', 'QCOM', 'AVGO', 'TXN', 'MU', 'AMAT', 'LRCX', 'ASML',
+  // Software & Cloud
+  'ADBE', 'CRM', 'ORCL', 'NOW', 'SNOW', 'DDOG', 'CRWD', 'ZS', 'NET', 'MDB',
+  // Fintech & Payments
+  'V', 'MA', 'PYPL', 'SQ', 'COIN', 'AFRM', 'SOFI',
+  // E-commerce & Social
+  'BABA', 'JD', 'PDD', 'SHOP', 'SNAP', 'PINS', 'U',
+  // AI & Data
+  'PLTR', 'AI', 'PATH', 'CFLT', 'ESTC',
+  // EV & Auto
+  'RIVN', 'LCID', 'NIO', 'XPEV', 'LI', 'F', 'GM',
+  // Finance
+  'JPM', 'GS', 'BAC', 'C', 'WFC', 'MS', 'BLK', 'SCHW',
+  // Healthcare
+  'JNJ', 'PFE', 'MRNA', 'UNH', 'ABBV', 'LLY', 'ISRG', 'DXCM',
+  // Consumer
+  'AMZN', 'COST', 'WMT', 'NKE', 'SBUX', 'MCD', 'DIS',
+  // Energy
+  'XOM', 'CVX', 'COP', 'SLB', 'OXY',
+  // Telecom & Media
+  'T', 'VZ', 'TMUS', 'NFLX', 'SPOT',
+  // Aerospace & Defense
+  'BA', 'LMT', 'RTX', 'SPCE',
+  // Others
+  'UBER', 'ABNB', 'SNAP', 'HOOD', 'RBLX',
+];
+
+// Default display sets (subset for performance)
+export const DEFAULT_HK_STOCKS = ALL_HK_STOCKS.slice(0, 30);
+export const DEFAULT_US_STOCKS = ALL_US_STOCKS.slice(0, 30);
 
 // ---- useQuotes: periodic real-time quotes ----
 export function useQuotes(symbols: string[], intervalMs: number = 30_000) {

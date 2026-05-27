@@ -1,7 +1,12 @@
-const QUOTE_URL = 'https://query1.finance.yahoo.com/v7/finance/quote';
-const CHART_URL = 'https://query1.finance.yahoo.com/v8/finance/chart';
-const SEARCH_URL = 'https://query1.finance.yahoo.com/v1/finance/search';
-const NEWS_URL = 'https://query2.finance.yahoo.com/v1/finance/news';
+// Use proxy in dev (Vite handles /api/yahoo/* -> Yahoo Finance)
+const isDev = typeof window !== 'undefined' && window.location.port === '5173';
+const BASE = isDev ? '' : 'https://query1.finance.yahoo.com';
+const BASE_NEWS = isDev ? '' : 'https://query2.finance.yahoo.com';
+
+const QUOTE_URL = isDev ? '/api/yahoo/v7/finance/quote' : `${BASE}/v7/finance/quote`;
+const CHART_URL = isDev ? '/api/yahoo/v8/finance/chart' : `${BASE}/v8/finance/chart`;
+const SEARCH_URL = isDev ? '/api/yahoo/v1/finance/search' : `${BASE}/v1/finance/search`;
+const NEWS_URL = isDev ? '/api/yahoo-news/v1/finance/news' : `${BASE_NEWS}/v1/finance/news`;
 
 // ---- Symbol conversion ----
 const HK_MAP: Record<string, string> = {
@@ -21,16 +26,20 @@ const INDEX_MAP: Record<string, string> = {
 export function toYahooSymbol(sym: string): string {
   if (INDEX_MAP[sym]) return INDEX_MAP[sym];
   if (HK_MAP[sym]) return HK_MAP[sym];
-  // Auto-detect HK stock
-  if (/^\d{5}$/.test(sym)) return `${parseInt(sym, 10)}.HK`;
+  // Auto-detect HK stock: 5-digit code → 4-digit padded HK format
+  if (/^\d{5}$/.test(sym)) {
+    const num = parseInt(sym, 10);
+    return `${String(num).padStart(4, '0')}.HK`;
+  }
   return sym;
 }
 
 function fromYahooSymbol(ys: string): string {
   for (const [k, v] of Object.entries(INDEX_MAP)) { if (v === ys) return k; }
   for (const [k, v] of Object.entries(HK_MAP)) { if (v === ys) return k; }
+  // Handle 4-digit.HK format → pad to 5-digit
   const m = ys.match(/^(\d{1,4})\.HK$/);
-  if (m) return String(parseInt(m[1], 10)).padStart(5, '0');
+  if (m) return m[1].padStart(5, '0');
   return ys;
 }
 
