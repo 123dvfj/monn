@@ -1,4 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useQuotes } from '../hooks/useStockData';
+import { useStore } from '../stores/useStore';
+import StockSelector from '../components/StockSelector';
 
 const indicators = [
   { name: 'MA', fullName: '移动平均线', category: '趋势' },
@@ -33,6 +36,26 @@ const patterns = [
 const drawingTools = ['趋势线', '水平线', '通道线', '斐波那契回调', '斐波那契扩展', '矩形框', '文字标注'];
 
 export default function Technical() {
+  const storeSymbol = useStore((s) => s.selectedStockSymbol);
+  const setSelectedStockSymbol = useStore((s) => s.setSelectedStockSymbol);
+  const [symbol, setSymbol] = useState(storeSymbol);
+
+  useEffect(() => {
+    if (storeSymbol && storeSymbol !== symbol) {
+      setSymbol(storeSymbol);
+    }
+  }, [storeSymbol]);
+
+  const handleSelectStock = (sym: string) => {
+    setSymbol(sym);
+    setSelectedStockSymbol(sym);
+  };
+
+  const { quotes } = useQuotes([symbol], 60_000);
+  const q = quotes.find((x) => x.symbol === symbol);
+  const price = q?.regularMarketPrice ?? 0;
+  const chgPct = q?.regularMarketChangePercent ?? 0;
+
   const [activeTab, setActiveTab] = useState('indicators');
   const [selectedCategory, setSelectedCategory] = useState('全部');
 
@@ -49,6 +72,23 @@ export default function Technical() {
       </div>
 
       <div style={{ padding: '0 28px 20px' }}>
+        {/* Stock Selector */}
+        <div className="card mb-4" style={{ padding: '12px 16px' }}>
+          <StockSelector
+            value={symbol}
+            onChange={handleSelectStock}
+            priceLabel={q ? (
+              <>
+                <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>{q.shortName ?? ''}</span>
+                <span style={{ marginLeft: 12 }}>{price.toFixed(2)}</span>
+                <span className={chgPct >= 0 ? 'color-up' : 'color-down'} style={{ fontSize: '13px', marginLeft: 8 }}>
+                  {chgPct >= 0 ? '+' : ''}{chgPct.toFixed(2)}%
+                </span>
+              </>
+            ) : undefined}
+          />
+        </div>
+
         <div className="tabs mb-4" style={{ display: 'inline-flex' }}>
           {['indicators', 'patterns', 'drawing', 'custom'].map((tab) => (
             <button

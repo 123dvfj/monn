@@ -1,11 +1,16 @@
+import { useState } from 'react';
 import { useQuotes, useNews, INDEX_SYMBOLS, DEFAULT_HK_STOCKS, DEFAULT_US_STOCKS } from '../hooks/useStockData';
 import { hotStocks as fallbackStocks, sectorData, indexData as fallbackIndices } from '../utils/mockData';
 import { useT } from '../i18n/I18nContext';
 
+const ALL_STOCKS = [...DEFAULT_HK_STOCKS, ...DEFAULT_US_STOCKS];
+const INITIAL_STOCKS = [...DEFAULT_HK_STOCKS.slice(0, 15), ...DEFAULT_US_STOCKS.slice(0, 15)];
+
 export default function Dashboard() {
   const { t } = useT();
+  const [fetchAll, setFetchAll] = useState(false);
   const { quotes: indexQuotes, loading: idxLoading } = useQuotes(INDEX_SYMBOLS, 30_000);
-  const { quotes: stockQuotes, loading: stkLoading } = useQuotes([...DEFAULT_HK_STOCKS, ...DEFAULT_US_STOCKS], 30_000);
+  const { quotes: stockQuotes, loading: stkLoading } = useQuotes(fetchAll ? ALL_STOCKS : INITIAL_STOCKS, 30_000);
   const { news, loading: newsLoading } = useNews();
 
   const loading = idxLoading || stkLoading;
@@ -46,7 +51,14 @@ export default function Dashboard() {
         </div>
 
         <div className="card">
-          <div className="card-header"><span className="card-title">{t('hotStocks')}</span></div>
+          <div className="card-header">
+            <span className="card-title">{t('hotStocks')}</span>
+            {!fetchAll && (
+              <button className="btn btn-sm" onClick={() => setFetchAll(true)}>
+                加载全部 {ALL_STOCKS.length} 只股票
+              </button>
+            )}
+          </div>
           <table className="data-table">
             <thead><tr><th>{t('symbol')}</th><th>{t('name')}</th><th>{t('price')}</th><th>{t('change')}</th><th>{t('volume')}</th></tr></thead>
             <tbody>

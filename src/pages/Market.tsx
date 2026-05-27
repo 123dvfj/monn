@@ -346,7 +346,7 @@ export default function Market() {
                       <td>{q.askSize ? (q.askSize / 100).toFixed(0) : '---'}</td>
                     </tr>
                   ) : (
-                    <tr><td colSpan={2} style={{ color: 'var(--text-tertiary)', textAlign: 'center' }}>暂无盘口数据</td></tr>
+                    <tr><td colSpan={2} style={{ color: 'var(--text-tertiary)', textAlign: 'center' }}>数据源不提供盘口数据</td></tr>
                   )}
                 </tbody>
               </table>
@@ -362,7 +362,7 @@ export default function Market() {
                       <td>{q.bidSize ? (q.bidSize / 100).toFixed(0) : '---'}</td>
                     </tr>
                   ) : (
-                    <tr><td colSpan={2} style={{ color: 'var(--text-tertiary)', textAlign: 'center' }}>暂无盘口数据</td></tr>
+                    <tr><td colSpan={2} style={{ color: 'var(--text-tertiary)', textAlign: 'center' }}>数据源不提供盘口数据</td></tr>
                   )}
                 </tbody>
               </table>

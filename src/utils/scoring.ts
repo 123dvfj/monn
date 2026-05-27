@@ -77,10 +77,10 @@ function scoreFundamental(q: YQuote): FundScoreDetail {
 
   // 3. Forward PE (outlook)
   const fwdPE = q.forwardPE;
-  if (fwdPE != null && fwdPE > 0) {
+  if (fwdPE != null && fwdPE > 0 && pe != null && pe > 0) {
     let s: number, rn: string;
-    if (fwdPE < pe!) { s = 8; rn = '预期盈利增长 — 前瞻PE低于当前'; }
-    else if (fwdPE < pe! * 1.1) { s = 6; rn = '预期稳定 — 前瞻PE与当前持平'; }
+    if (fwdPE < pe) { s = 8; rn = '预期盈利增长 — 前瞻PE低于当前'; }
+    else if (fwdPE < pe * 1.1) { s = 6; rn = '预期稳定 — 前瞻PE与当前持平'; }
     else { s = 4; rn = '预期盈利下降 — 前瞻PE高于当前'; }
     scores.push(s);
     details['前瞻PE'] = { value: fwdPE, score: s, ratingNote: rn };
@@ -120,6 +120,9 @@ function scoreFundamental(q: YQuote): FundScoreDetail {
     else { s = 3; rn = `交投清淡(${ratio.toFixed(1)}x) — 市场关注度低`; }
     scores.push(s);
     details['成交量'] = { value: ratio, score: s, ratingNote: rn };
+  } else {
+    scores.push(5);
+    details['成交量'] = { value: null, score: 5, ratingNote: '无日均成交量数据' };
   }
 
   const avg = scores.reduce((a, b) => a + b, 0) / scores.length;

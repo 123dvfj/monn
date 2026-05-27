@@ -3,6 +3,7 @@ import { useQuotes, ALL_HK_STOCKS, ALL_US_STOCKS } from '../hooks/useStockData';
 import type { YQuote } from '../services/yahooFinance';
 import { computeCompositeScore, scoreToRating, type CompositeResult } from '../utils/scoring';
 import { useCountUp } from '../hooks/useCountUp';
+import { useT } from '../i18n/I18nContext';
 
 interface FilterCondition {
   id: string;
@@ -19,6 +20,7 @@ interface ChatMessage {
 }
 
 const ALL_STOCKS_FULL = [...ALL_HK_STOCKS, ...ALL_US_STOCKS];
+const INITIAL_SCREENER_STOCKS = [...ALL_HK_STOCKS.slice(0, 20), ...ALL_US_STOCKS.slice(0, 20)];
 
 function analyzeScreenerResults(results: YQuote[]): {
   topByChange: YQuote[];
@@ -149,7 +151,10 @@ function localFinancialQA(question: string, quotes: YQuote[]): string {
 }
 
 export default function Screener() {
-  const { quotes, loading } = useQuotes(ALL_STOCKS_FULL, 60_000);
+  const { t } = useT();
+  const [fetchAll, setFetchAll] = useState(false);
+  const fetchSymbols = fetchAll ? ALL_STOCKS_FULL : INITIAL_SCREENER_STOCKS;
+  const { quotes, loading } = useQuotes(fetchSymbols, 60_000);
   const [activeTab, setActiveTab] = useState('screener');
 
   // ---- Screener state ----
@@ -271,7 +276,7 @@ export default function Screener() {
       <div className="page-header">
         <h1 className="page-title">AI 智能选股</h1>
         <p className="page-desc">
-          {loading ? '加载数据中...' : <><span className="live-dot" />条件筛选 · AI推荐 · AI问答 · {quotes.filter(q => q.regularMarketPrice > 0).length} 只股票可用</>}
+          {loading ? '加载数据中...' : <><span className="live-dot" />条件筛选 · AI推荐 · AI问答 · {quotes.filter(q => q.regularMarketPrice > 0).length}/{fetchAll ? ALL_STOCKS_FULL.length : INITIAL_SCREENER_STOCKS.length} 只股票{!fetchAll ? <button className="btn btn-sm" style={{ marginLeft: 8 }} onClick={() => setFetchAll(true)}>加载全部 {ALL_STOCKS_FULL.length} 只</button> : null}</>}
         </p>
       </div>
 
@@ -424,7 +429,7 @@ export default function Screener() {
             {/* Market Stats */}
             <div className="dashboard-grid fixed-3col mb-4">
               <div className="card" style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>AI 综合评分 (0-10)</div>
+                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('aiCompositeScore')}</div>
                 <div className="stat-value" style={{ fontSize: '32px', marginTop: 8, color: (() => {
                   const s = recommendations[0]?.compositeScore ?? 0;
                   return s >= 8 ? 'var(--color-up)' : s >= 6.5 ? 'var(--color-accent)' : s >= 5 ? 'var(--color-warning)' : 'var(--color-down)';

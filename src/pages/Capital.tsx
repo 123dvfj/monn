@@ -1,9 +1,9 @@
 import { useState, useMemo, useEffect } from 'react';
-import { useQuotes, ALL_HK_STOCKS, ALL_US_STOCKS } from '../hooks/useStockData';
+import { useQuotes } from '../hooks/useStockData';
 import type { YQuote } from '../services/yahooFinance';
 import { useStore } from '../stores/useStore';
-
-const ALL_STOCKS = [...ALL_HK_STOCKS, ...ALL_US_STOCKS];
+import StockSelector from '../components/StockSelector';
+import { useT } from '../i18n/I18nContext';
 
 function generateFlowSummary(q: YQuote | undefined, symbol: string): string[] {
   if (!q || !q.regularMarketPrice) return ['请先选择一只股票以生成资金面分析。'];
@@ -59,7 +59,9 @@ function generateFlowSummary(q: YQuote | undefined, symbol: string): string[] {
 }
 
 export default function Capital() {
+  const { t } = useT();
   const storeSymbol = useStore((s) => s.selectedStockSymbol);
+  const setSelectedStockSymbol = useStore((s) => s.setSelectedStockSymbol);
   const [symbol, setSymbol] = useState(storeSymbol);
 
   useEffect(() => {
@@ -68,14 +70,10 @@ export default function Capital() {
     }
   }, [storeSymbol]);
 
-  const [searchText, setSearchText] = useState('');
-  const [showDropdown, setShowDropdown] = useState(false);
-
-  const stockList = useMemo(() => {
-    if (!searchText.trim()) return ALL_STOCKS;
-    const kw = searchText.toUpperCase();
-    return ALL_STOCKS.filter((s) => s.includes(kw)).slice(0, 30);
-  }, [searchText]);
+  const handleSelectStock = (sym: string) => {
+    setSymbol(sym);
+    setSelectedStockSymbol(sym);
+  };
 
   const { quotes } = useQuotes([symbol], 60_000);
   const q = quotes.find((x) => x.symbol === symbol);
@@ -94,12 +92,6 @@ export default function Capital() {
 
   const aiPoints = useMemo(() => generateFlowSummary(q, symbol), [q, symbol]);
 
-  const selectStock = (sym: string) => {
-    setSymbol(sym);
-    setSearchText('');
-    setShowDropdown(false);
-  };
-
   return (
     <div>
       <div className="page-header">
@@ -110,46 +102,26 @@ export default function Capital() {
       <div style={{ padding: '0 28px 20px' }}>
         {/* Stock Selector */}
         <div className="card mb-4" style={{ padding: '12px 16px' }}>
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', position: 'relative' }}>
-            <span style={{ fontSize: '13px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>选择股票：</span>
-            <input
-              className="input"
-              placeholder="输入代码搜索..."
-              value={searchText}
-              onChange={(e) => { setSearchText(e.target.value); setShowDropdown(true); }}
-              onFocus={() => setShowDropdown(true)}
-              style={{ width: 260, fontSize: '13px' }}
-            />
-            {q && (
-              <span style={{ fontSize: '14px', fontWeight: 600 }}>
-                {symbol} <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>{q.shortName ?? ''}</span>
+          <StockSelector
+            value={symbol}
+            onChange={handleSelectStock}
+            priceLabel={q ? (
+              <>
+                <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>{q.shortName ?? ''}</span>
                 <span style={{ marginLeft: 12 }}>{price.toFixed(2)}</span>
                 <span className={chgPct >= 0 ? 'color-up' : 'color-down'} style={{ fontSize: '13px', marginLeft: 8 }}>
                   {chgPct >= 0 ? '+' : ''}{chgPct.toFixed(2)}%
                 </span>
-              </span>
-            )}
-            {showDropdown && searchText && (
-              <div style={{
-                position: 'absolute', top: '100%', left: 80, width: 260,
-                background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)',
-                borderRadius: 'var(--radius-sm)', zIndex: 100, maxHeight: 250, overflow: 'auto',
-              }}>
-                {stockList.map((s) => (
-                  <div key={s} onClick={() => selectStock(s)}
-                    style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '13px', fontFamily: 'monospace' }}
-                    className="sidebar-item">{s}</div>
-                ))}
-              </div>
-            )}
-          </div>
+              </>
+            ) : undefined}
+          />
         </div>
 
         {/* AI Flow Summary */}
         <div className="card mb-4" style={{ borderLeft: '3px solid var(--color-warning)' }}>
           <div className="card-title mb-3" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span>AI 资金面分析</span>
-            <span className="badge" style={{ background: '#d2992222', color: 'var(--color-warning)', fontSize: '10px' }}>量价推断</span>
+            <span>{t('aiFundFlowAnalysis')}</span>
+            <span className="badge" style={{ background: '#d2992222', color: 'var(--color-warning)', fontSize: '10px' }}>{t('volPriceInfer')}</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {aiPoints.map((point, i) => (
@@ -163,7 +135,7 @@ export default function Capital() {
         {/* Key Metrics Cards */}
         <div className="dashboard-grid fixed-3col mb-4">
           <div className="card" style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>成交量 vs 日均</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('dailyVolume')} vs {t('avgVolume3M')}</div>
             <div className="stat-value" style={{ fontSize: '28px', marginTop: 8, color: hasAvgVol ? (volRatio > 1.5 ? 'var(--color-up)' : volRatio < 0.5 ? 'var(--color-down)' : 'var(--text-primary)') : 'var(--text-tertiary)' }}>
               {hasAvgVol ? `${volRatio.toFixed(1)}x` : '---'}
             </div>
@@ -172,7 +144,7 @@ export default function Capital() {
             </div>
           </div>
           <div className="card" style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>日内价格位置</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('intradayPosition')}</div>
             <div style={{ marginTop: 8, height: 8, background: 'linear-gradient(90deg, var(--color-down), var(--color-warning), var(--color-up))', borderRadius: 4, position: 'relative' }}>
               <div style={{ position: 'absolute', left: `${posInDay}%`, top: -4, width: 16, height: 16, background: '#fff', borderRadius: '50%', border: '2px solid var(--color-accent)', transform: 'translateX(-50%)' }} />
             </div>
@@ -182,7 +154,7 @@ export default function Capital() {
             </div>
           </div>
           <div className="card" style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>量价配合信号</div>
+            <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('volPriceSignal')}</div>
             <div className="stat-value" style={{ fontSize: '24px', marginTop: 8, color: chgPct > 0 && volRatio > 1.2 ? 'var(--color-up)' : chgPct < 0 && volRatio > 1.2 ? 'var(--color-down)' : 'var(--text-secondary)' }}>
               {!hasAvgVol ? '数据不足 —' :
                chgPct > 0 && volRatio > 1.2 ? '放量上涨 ▲' :
@@ -195,7 +167,7 @@ export default function Capital() {
 
         {/* Volume Analysis */}
         <div className="card mb-4">
-          <div className="card-title mb-4">成交量分析</div>
+          <div className="card-title mb-4">{t('volumeAnalysis')}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {[
               { label: '当日成交量', value: vol > 0 ? `${(vol / 10000).toFixed(0)}万` : '---',
@@ -228,7 +200,7 @@ export default function Capital() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: 16 }}>
           {/* Bid/Ask */}
           <div className="card">
-            <div className="card-title mb-4">盘口数据</div>
+            <div className="card-title mb-4">{t('bidAskData')}</div>
             {q?.bid != null || q?.ask != null ? (
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
@@ -251,14 +223,14 @@ export default function Capital() {
               </div>
             ) : (
               <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-tertiary)', fontSize: '13px' }}>
-                {isHK ? '港股暂无实时盘口数据' : '暂无盘口数据（可能非交易时段）'}
+                当前数据源(Yahoo Finance v8)不提供实时盘口数据
               </div>
             )}
           </div>
 
           {/* Volume Anomaly Detection */}
           <div className="card">
-            <div className="card-title mb-4">成交量异常评分</div>
+            <div className="card-title mb-4">{t('volumeAnomalyScore')}</div>
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontSize: '40px', fontWeight: 700, color: hasAvgVol ? (volRatio > 2 ? 'var(--color-up)' : volRatio > 1.3 ? 'var(--color-warning)' : 'var(--text-secondary)') : 'var(--text-tertiary)' }}>
                 {!hasAvgVol ? '—' : volRatio > 3 ? '🔥' : volRatio > 2 ? '▲' : volRatio > 1.3 ? '▶' : '—'}

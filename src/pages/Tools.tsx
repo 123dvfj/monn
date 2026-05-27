@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useStore } from '../stores/useStore';
-import { hotStocks } from '../utils/mockData';
-import { useQuotes } from '../hooks/useStockData';
+import { useQuotes, ALL_HK_STOCKS, ALL_US_STOCKS } from '../hooks/useStockData';
+
+const ALL_STOCKS = [...ALL_HK_STOCKS, ...ALL_US_STOCKS];
 
 export default function Tools() {
   const [activeTab, setActiveTab] = useState('watchlist');
@@ -40,6 +41,10 @@ function WatchlistPanel() {
   const [showAddStock, setShowAddStock] = useState(false);
 
   const currentGroup = watchlistGroups.find((g) => g.id === activeGroup);
+  const allWatchlistSymbols = [...new Set(watchlistGroups.flatMap((g) => g.stocks))];
+  const { quotes } = useQuotes(allWatchlistSymbols, 30_000);
+
+  const getQuote = (sym: string) => quotes.find((q) => q.symbol === sym);
 
   const handleAddGroup = () => {
     if (!newGroupName.trim()) return;
@@ -111,31 +116,33 @@ function WatchlistPanel() {
           )}
           {showAddStock && searchSymbol && (
             <div className="mb-4" style={{ maxHeight: 200, overflow: 'auto' }}>
-              {hotStocks
-                .filter((s) =>
-                  s.symbol.toLowerCase().includes(searchSymbol.toLowerCase()) ||
-                  s.name.toLowerCase().includes(searchSymbol.toLowerCase())
-                )
-                .map((s) => (
-                  <div
-                    key={s.symbol}
-                    style={{ padding: '8px 12px', cursor: 'pointer', borderRadius: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                    className="sidebar-item"
-                    onClick={() => {
-                      addToWatchlist(activeGroup, s.symbol);
-                      setSearchSymbol('');
-                      setShowAddStock(false);
-                    }}
-                  >
-                    <span>
-                      <span style={{ color: 'var(--color-accent)' }}>{s.symbol}</span>
-                      {' '}{s.name} · {s.market === 'HK' ? '港股' : '美股'}
-                    </span>
-                    <span className={s.changePercent >= 0 ? 'color-up' : 'color-down'} style={{ fontSize: '12px' }}>
-                      {s.price.toFixed(2)} ({s.changePercent >= 0 ? '+' : ''}{s.changePercent.toFixed(2)}%)
-                    </span>
-                  </div>
-                ))}
+              {ALL_STOCKS
+                .filter((s) => s.includes(searchSymbol.toUpperCase()))
+                .slice(0, 20)
+                .map((sym) => {
+                  const q = getQuote(sym);
+                  const isHK = /^\d{5}$/.test(sym);
+                  return (
+                    <div
+                      key={sym}
+                      style={{ padding: '8px 12px', cursor: 'pointer', borderRadius: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                      className="sidebar-item"
+                      onClick={() => {
+                        addToWatchlist(activeGroup, sym);
+                        setSearchSymbol('');
+                        setShowAddStock(false);
+                      }}
+                    >
+                      <span>
+                        <span style={{ color: 'var(--color-accent)' }}>{sym}</span>
+                        {' '}{q?.shortName ?? sym} · {isHK ? '港股' : '美股'}
+                      </span>
+                      <span className={(q?.regularMarketChangePercent ?? 0) >= 0 ? 'color-up' : 'color-down'} style={{ fontSize: '12px' }}>
+                        {q?.regularMarketPrice ? `${q.regularMarketPrice.toFixed(2)} (${(q.regularMarketChangePercent ?? 0) >= 0 ? '+' : ''}${(q.regularMarketChangePercent ?? 0).toFixed(2)}%)` : '---'}
+                      </span>
+                    </div>
+                  );
+                })}
             </div>
           )}
 
@@ -148,16 +155,20 @@ function WatchlistPanel() {
               </thead>
               <tbody>
                 {currentGroup.stocks.map((sym) => {
-                  const stock = hotStocks.find((s) => s.symbol === sym);
+                  const q = getQuote(sym);
+                  const livePrice = q?.regularMarketPrice;
+                  const liveChgPct = q?.regularMarketChangePercent ?? 0;
+                  const liveName = q?.shortName ?? sym;
+                  const isHK = /^\d{5}$/.test(sym);
                   return (
                     <tr key={sym}>
                       <td style={{ color: 'var(--color-accent)' }}>{sym}</td>
-                      <td>{stock?.name ?? sym}</td>
-                      <td className="font-mono">{stock?.price.toFixed(2) ?? '-'}</td>
-                      <td className={stock && stock.changePercent >= 0 ? 'color-up' : 'color-down'}>
-                        {stock ? `${stock.changePercent >= 0 ? '+' : ''}${stock.changePercent.toFixed(2)}%` : '-'}
+                      <td>{liveName}</td>
+                      <td className="font-mono">{livePrice ? livePrice.toFixed(2) : '-'}</td>
+                      <td className={liveChgPct >= 0 ? 'color-up' : 'color-down'}>
+                        {livePrice ? `${liveChgPct >= 0 ? '+' : ''}${liveChgPct.toFixed(2)}%` : '-'}
                       </td>
-                      <td>{stock?.market === 'HK' ? '港股' : stock?.market === 'US' ? '美股' : '-'}</td>
+                      <td>{isHK ? '港股' : q?.exchangeName === 'NMS' || q?.exchangeName === 'NYQ' ? '美股' : isHK ? '港股' : '美股'}</td>
                       <td>
                         <button
                           className="btn btn-sm btn-danger"
@@ -195,10 +206,7 @@ function HoldingsPanel() {
 
   const getPrice = (symbol: string): number => {
     const q = quotes.find((x) => x.symbol === symbol);
-    if (q?.regularMarketPrice) return q.regularMarketPrice;
-    // fallback to mock
-    const mock = hotStocks.find((s) => s.symbol === symbol);
-    return mock?.price ?? 0;
+    return q?.regularMarketPrice ?? 0;
   };
 
   const totalValue = holdings.reduce((sum, h) => sum + getPrice(h.symbol) * h.quantity, 0);
@@ -209,11 +217,11 @@ function HoldingsPanel() {
   const handleBuy = () => {
     const symbol = buyForm.symbol.toUpperCase();
     const quote = quotes.find((q) => q.symbol === symbol);
-    const mockStock = hotStocks.find((s) => s.symbol === symbol);
-    if (!quote && !mockStock) return;
-    const price = buyForm.price > 0 ? buyForm.price : (quote?.regularMarketPrice ?? mockStock?.price ?? 0);
-    const name = quote?.shortName ?? mockStock?.name ?? symbol;
-    const market = quote?.exchangeName === 'HKG' ? 'HK' as const : 'US' as const;
+    if (!quote) return;
+    const price = buyForm.price > 0 ? buyForm.price : (quote.regularMarketPrice ?? 0);
+    const name = quote.shortName ?? symbol;
+    const isHK = /^\d{5}$/.test(symbol);
+    const market = isHK ? 'HK' as const : 'US' as const;
     addHolding({
       symbol, name, buyPrice: price, quantity: buyForm.quantity,
       buyDate: new Date().toISOString().split('T')[0], market,

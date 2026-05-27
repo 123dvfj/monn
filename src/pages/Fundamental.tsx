@@ -1,11 +1,11 @@
 import { useState, useMemo, useEffect } from 'react';
-import { useQuotes, ALL_HK_STOCKS, ALL_US_STOCKS } from '../hooks/useStockData';
+import { useQuotes } from '../hooks/useStockData';
 import type { YQuote } from '../services/yahooFinance';
 import { financialData, announcements } from '../utils/mockData';
 import { computeCompositeScore, type CompositeResult } from '../utils/scoring';
 import { useStore } from '../stores/useStore';
-
-const ALL_STOCKS = [...ALL_HK_STOCKS, ...ALL_US_STOCKS];
+import StockSelector from '../components/StockSelector';
+import { useT } from '../i18n/I18nContext';
 
 function generateAISummary(q: YQuote | undefined, composite: CompositeResult | null): string[] {
   if (!q || !q.regularMarketPrice) return ['请先选择一只股票以生成 AI 分析摘要。'];
@@ -65,28 +65,26 @@ function generateAISummary(q: YQuote | undefined, composite: CompositeResult | n
 }
 
 export default function Fundamental() {
+  const { t } = useT();
   const storeSymbol = useStore((s) => s.selectedStockSymbol);
+  const setSelectedStockSymbol = useStore((s) => s.setSelectedStockSymbol);
   const [symbol, setSymbol] = useState(storeSymbol);
 
-  // Sync from Market page selection
   useEffect(() => {
     if (storeSymbol && storeSymbol !== symbol) {
       setSymbol(storeSymbol);
     }
   }, [storeSymbol]);
-  const [searchText, setSearchText] = useState('');
-  const [showDropdown, setShowDropdown] = useState(false);
-  const [activeTab, setActiveTab] = useState('overview');
 
-  const stockList = useMemo(() => {
-    if (!searchText.trim()) return ALL_STOCKS;
-    const kw = searchText.toUpperCase();
-    return ALL_STOCKS.filter((s) => s.includes(kw)).slice(0, 30);
-  }, [searchText]);
+  const handleSelectStock = (sym: string) => {
+    setSymbol(sym);
+    setSelectedStockSymbol(sym);
+  };
 
   const { quotes } = useQuotes([symbol], 60_000);
   const q = quotes.find((x) => x.symbol === symbol);
   const isHK = /^\d{5}$/.test(symbol);
+  const [activeTab, setActiveTab] = useState('overview');
 
   const composite = useMemo(() => q ? computeCompositeScore(q) : null, [q]);
   const aiPoints = useMemo(() => generateAISummary(q, composite), [q, composite]);
@@ -98,12 +96,6 @@ export default function Fundamental() {
   const high52 = q?.fiftyTwoWeekHigh ?? 0;
   const low52 = q?.fiftyTwoWeekLow ?? 0;
 
-  const selectStock = (sym: string) => {
-    setSymbol(sym);
-    setSearchText('');
-    setShowDropdown(false);
-  };
-
   return (
     <div>
       <div className="page-header">
@@ -114,48 +106,26 @@ export default function Fundamental() {
       <div style={{ padding: '0 28px 20px' }}>
         {/* Stock Selector */}
         <div className="card mb-4" style={{ padding: '12px 16px' }}>
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', position: 'relative' }}>
-            <span style={{ fontSize: '13px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>选择股票：</span>
-            <input
-              className="input"
-              placeholder="输入代码搜索，如 00700 / AAPL / QQQ..."
-              value={searchText}
-              onChange={(e) => { setSearchText(e.target.value); setShowDropdown(true); }}
-              onFocus={() => setShowDropdown(true)}
-              style={{ width: 300, fontSize: '13px' }}
-            />
-            {q && (
-              <span style={{ fontSize: '14px', fontWeight: 600 }}>
-                {symbol} <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>{q.shortName ?? q.longName ?? ''}</span>
+          <StockSelector
+            value={symbol}
+            onChange={handleSelectStock}
+            priceLabel={q ? (
+              <>
+                <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>{q.shortName ?? q.longName ?? ''}</span>
                 <span style={{ marginLeft: 12, fontSize: '14px', fontWeight: 700 }}>{price.toFixed(2)}</span>
                 <span className={changePct >= 0 ? 'color-up' : 'color-down'} style={{ fontSize: '13px', marginLeft: 8 }}>
                   {changePct >= 0 ? '+' : ''}{changePct.toFixed(2)}%
                 </span>
-              </span>
-            )}
-            {showDropdown && searchText && (
-              <div style={{
-                position: 'absolute', top: '100%', left: 80, width: 300,
-                background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)',
-                borderRadius: 'var(--radius-sm)', zIndex: 100, maxHeight: 250, overflow: 'auto',
-              }}>
-                {stockList.map((s) => (
-                  <div key={s} onClick={() => selectStock(s)}
-                    style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '13px', fontFamily: 'monospace' }}
-                    className="sidebar-item">
-                    {s}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+              </>
+            ) : undefined}
+          />
         </div>
 
         {/* Composite Score Card */}
         {composite && (
           <div className="dashboard-grid fixed-3col mb-4">
             <div className="card" style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>综合评级</div>
+              <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('compositeRating')}</div>
               <div style={{ fontSize: '36px', fontWeight: 700, marginTop: 4, color: (() => {
                 const s = composite.compositeScore;
                 return s >= 8 ? 'var(--color-up)' : s >= 6.5 ? 'var(--color-accent)' : s >= 5 ? 'var(--color-warning)' : 'var(--color-down)';
@@ -166,35 +136,35 @@ export default function Fundamental() {
                 {composite.rating}
               </div>
               <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: 2 }}>
-                置信度: {composite.confidence}
+                {t('confidence2')}: {composite.confidence}
               </div>
             </div>
             <div className="card" style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>三维评分</div>
+              <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('threeDimScore')}</div>
               <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', marginTop: 10 }}>
                 <div>
-                  <div style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>基本面</div>
+                  <div style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>{t('fundamentalScore')}</div>
                   <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--color-accent)' }}>{composite.fundamentalScore.toFixed(1)}</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>技术面</div>
+                  <div style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>{t('technicalScore')}</div>
                   <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--color-purple)' }}>{composite.technicalScore.toFixed(1)}</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>情绪面</div>
+                  <div style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>{t('sentimentScore')}</div>
                   <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--color-green)' }}>{composite.sentimentScore.toFixed(1)}</div>
                 </div>
               </div>
               <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: 8 }}>
-                40% + 30% + 30% 加权
+                {t('weighted40_30_30')}
               </div>
             </div>
             <div className="card" style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>关键价位</div>
+              <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('keyPriceLevels')}</div>
               <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', marginTop: 10, lineHeight: 1.8 }}>
-                <div>入场: <span style={{ color: 'var(--color-up)' }}>{composite.entryLevels.aggressive}</span> / {composite.entryLevels.moderate} / <span style={{ color: 'var(--color-warning)' }}>{composite.entryLevels.conservative}</span></div>
-                <div>目标: <span style={{ color: 'var(--color-up)' }}>{composite.exitTargets.target1}</span> / {composite.exitTargets.target2} / <span style={{ color: 'var(--color-purple)' }}>{composite.exitTargets.target3}</span></div>
-                <div>止损: <span style={{ color: 'var(--color-down)' }}>{composite.stopLoss}</span></div>
+                <div>{t('entry')}: <span style={{ color: 'var(--color-up)' }}>{composite.entryLevels.aggressive}</span> / {composite.entryLevels.moderate} / <span style={{ color: 'var(--color-warning)' }}>{composite.entryLevels.conservative}</span></div>
+                <div>{t('target')}: <span style={{ color: 'var(--color-up)' }}>{composite.exitTargets.target1}</span> / {composite.exitTargets.target2} / <span style={{ color: 'var(--color-purple)' }}>{composite.exitTargets.target3}</span></div>
+                <div>{t('stopLoss')}: <span style={{ color: 'var(--color-down)' }}>{composite.stopLoss}</span></div>
               </div>
             </div>
           </div>
