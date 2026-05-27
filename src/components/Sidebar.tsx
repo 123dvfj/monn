@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, TrendingUp, CandlestickChart, FileText,
-  Banknote, Search, Newspaper, Wrench, Clock, Globe,
+  Banknote, Search, Newspaper, Wrench, Globe,
 } from 'lucide-react';
 import { useT } from '../i18n/I18nContext';
 
@@ -41,7 +41,7 @@ export default function Sidebar() {
       titleKey: 'tools',
       items: [
         { path: '/tools', labelKey: 'auxTools', icon: <Wrench size={16} /> },
-        { path: '/review', labelKey: 'reviewStats', icon: <Clock size={16} /> },
+
       ],
     },
   ];

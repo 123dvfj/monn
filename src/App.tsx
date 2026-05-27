@@ -8,7 +8,7 @@ import Capital from './pages/Capital';
 import Screener from './pages/Screener';
 import News from './pages/News';
 import Tools from './pages/Tools';
-import Review from './pages/Review';
+
 import { useT } from './i18n/I18nContext';
 
 export default function App() {
@@ -29,7 +29,7 @@ export default function App() {
           <Route path="/screener" element={<Screener />} />
           <Route path="/news" element={<News />} />
           <Route path="/tools" element={<Tools />} />
-          <Route path="/review" element={<Review />} />
+
         </Routes>
       </main>
     </div>
