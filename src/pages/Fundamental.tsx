@@ -2,12 +2,13 @@ import { useState, useMemo } from 'react';
 import { useQuotes, ALL_HK_STOCKS, ALL_US_STOCKS } from '../hooks/useStockData';
 import type { YQuote } from '../services/yahooFinance';
 import { financialData, announcements } from '../utils/mockData';
+import { computeCompositeScore, type CompositeResult } from '../utils/scoring';
 
 const ALL_STOCKS = [...ALL_HK_STOCKS, ...ALL_US_STOCKS];
 
-function generateAISummary(q: YQuote | undefined, symbol: string): string[] {
+function generateAISummary(q: YQuote | undefined, composite: CompositeResult | null): string[] {
   if (!q || !q.regularMarketPrice) return ['请先选择一只股票以生成 AI 分析摘要。'];
-  const isHK = /^\d{5}$/.test(symbol);
+  const isHK = /^\d{5}$/.test(q.symbol ?? '');
   const currency = isHK ? 'HKD' : 'USD';
   const price = q.regularMarketPrice;
   const pe = q.trailingPE;
@@ -19,7 +20,12 @@ function generateAISummary(q: YQuote | undefined, symbol: string): string[] {
 
   const points: string[] = [];
 
-  // Valuation assessment
+  // Composite score header
+  if (composite) {
+    points.push(`【综合评级: ${composite.rating}】得分 ${composite.compositeScore.toFixed(1)}/10，置信度 ${composite.confidence}。评分维度: 基本面(${composite.fundamentalScore.toFixed(1)}) + 技术面(${composite.technicalScore.toFixed(1)}) + 情绪面(${composite.sentimentScore.toFixed(1)})。`);
+  }
+
+  // Valuation
   if (pe != null && pe > 0) {
     if (pe < 15) points.push(`当前 PE(TTM) 为 ${pe.toFixed(1)} 倍，处于较低估值区间，可能具有安全边际。`);
     else if (pe < 25) points.push(`当前 PE(TTM) 为 ${pe.toFixed(1)} 倍，估值处于合理区间，与市场平均水平接近。`);
@@ -38,7 +44,7 @@ function generateAISummary(q: YQuote | undefined, symbol: string): string[] {
   const capDesc = cap > 1e12 ? '超大盘' : cap > 1e11 ? '大盘' : cap > 1e10 ? '中盘' : '小盘';
   points.push(`市值约 ${(cap / 1e8).toFixed(0)} 亿${currency}，属于${capDesc}股票，流动性${cap > 1e11 ? '充裕' : '一般'}。`);
 
-  // Volume
+  // Volume analysis
   const vol = q.regularMarketVolume ?? 0;
   const avgVol = q.averageDailyVolume3Month ?? 1;
   if (vol > 0 && avgVol > 0) {
@@ -47,7 +53,12 @@ function generateAISummary(q: YQuote | undefined, symbol: string): string[] {
     else if (volRatio < 0.5) points.push(`今日成交量偏低（${volRatio.toFixed(1)}倍于日均），市场交投清淡。`);
   }
 
-  points.push('⚠️ 以上分析基于有限数据指标自动生成，不构成投资建议。投资决策请结合完整基本面研究。');
+  // Entry/Exit from composite
+  if (composite) {
+    points.push(`建议入场: 激进 ${composite.entryLevels.aggressive} / 适中 ${composite.entryLevels.moderate} / 保守 ${composite.entryLevels.conservative}。止损: ${composite.stopLoss}。目标: T1 ${composite.exitTargets.target1} / T2 ${composite.exitTargets.target2} / T3 ${composite.exitTargets.target3}。`);
+  }
+
+  points.push('以上分析基于有限数据指标自动生成，不构成投资建议。投资决策请结合完整基本面研究。');
 
   return points;
 }
@@ -68,7 +79,8 @@ export default function Fundamental() {
   const q = quotes.find((x) => x.symbol === symbol);
   const isHK = /^\d{5}$/.test(symbol);
 
-  const aiPoints = useMemo(() => generateAISummary(q, symbol), [q, symbol]);
+  const composite = useMemo(() => q ? computeCompositeScore(q) : null, [q]);
+  const aiPoints = useMemo(() => generateAISummary(q, composite), [q, composite]);
 
   const price = q?.regularMarketPrice ?? 0;
   const changePct = q?.regularMarketChangePercent ?? 0;
@@ -129,6 +141,55 @@ export default function Fundamental() {
             )}
           </div>
         </div>
+
+        {/* Composite Score Card */}
+        {composite && (
+          <div className="dashboard-grid fixed-3col mb-4">
+            <div className="card" style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>综合评级</div>
+              <div style={{ fontSize: '36px', fontWeight: 700, marginTop: 4, color: (() => {
+                const s = composite.compositeScore;
+                return s >= 8 ? 'var(--color-up)' : s >= 6.5 ? 'var(--color-accent)' : s >= 5 ? 'var(--color-warning)' : 'var(--color-down)';
+              })() }}>
+                {composite.compositeScore.toFixed(1)}
+              </div>
+              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginTop: 2 }}>
+                {composite.rating}
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: 2 }}>
+                置信度: {composite.confidence}
+              </div>
+            </div>
+            <div className="card" style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>三维评分</div>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', marginTop: 10 }}>
+                <div>
+                  <div style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>基本面</div>
+                  <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--color-accent)' }}>{composite.fundamentalScore.toFixed(1)}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>技术面</div>
+                  <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--color-purple)' }}>{composite.technicalScore.toFixed(1)}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>情绪面</div>
+                  <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--color-green)' }}>{composite.sentimentScore.toFixed(1)}</div>
+                </div>
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: 8 }}>
+                40% + 30% + 30% 加权
+              </div>
+            </div>
+            <div className="card" style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>关键价位</div>
+              <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', marginTop: 10, lineHeight: 1.8 }}>
+                <div>入场: <span style={{ color: 'var(--color-up)' }}>{composite.entryLevels.aggressive}</span> / {composite.entryLevels.moderate} / <span style={{ color: 'var(--color-warning)' }}>{composite.entryLevels.conservative}</span></div>
+                <div>目标: <span style={{ color: 'var(--color-up)' }}>{composite.exitTargets.target1}</span> / {composite.exitTargets.target2} / <span style={{ color: 'var(--color-purple)' }}>{composite.exitTargets.target3}</span></div>
+                <div>止损: <span style={{ color: 'var(--color-down)' }}>{composite.stopLoss}</span></div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* AI Summary */}
         <div className="card mb-4" style={{ borderLeft: '3px solid var(--color-accent)' }}>

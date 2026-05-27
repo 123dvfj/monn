@@ -1,6 +1,8 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useQuotes, ALL_HK_STOCKS, ALL_US_STOCKS } from '../hooks/useStockData';
 import type { YQuote } from '../services/yahooFinance';
+import { computeCompositeScore, scoreToRating, type CompositeResult } from '../utils/scoring';
+import { useCountUp } from '../hooks/useCountUp';
 
 interface FilterCondition {
   id: string;
@@ -35,60 +37,18 @@ function analyzeScreenerResults(results: YQuote[]): {
   return { topByChange, topByVolume, avgPE, upCount, downCount };
 }
 
-function generateRecommendations(quotes: YQuote[]): {
-  symbol: string; name: string; score: number; reason: string; style: string; risk: string;
-}[] {
-  const valid = quotes.filter((q) => q.regularMarketPrice > 0 && (q.trailingPE ?? 0) > 0 && q.marketCap);
+function generateRecommendations(quotes: YQuote[]): CompositeResult[] {
+  const valid = quotes.filter((q) => q.regularMarketPrice > 0);
   if (valid.length === 0) return [];
 
   return valid
-    .map((q) => {
-      const pe = q.trailingPE ?? 99;
-      const chg = q.regularMarketChangePercent ?? 0;
-      const cap = q.marketCap ?? 0;
-      let score = 50;
-
-      // PE scoring: lower is better but not negative
-      if (pe > 0 && pe < 15) score += 20;
-      else if (pe < 25) score += 10;
-      else if (pe < 40) score += 0;
-      else score -= 10;
-
-      // Recent momentum: positive change is good
-      if (chg > 2) score += 10;
-      else if (chg > 0) score += 5;
-      else if (chg < -2) score -= 10;
-
-      // Market cap: large cap = stable
-      if (cap > 1e12) score += 15;
-      else if (cap > 1e11) score += 10;
-      else if (cap > 1e10) score += 5;
-
-      const style = cap > 1e12 ? '长线价值' : cap > 5e10 ? '中线稳健' : '短线博弈';
-      const risk = cap > 1e12 ? '低' : cap > 5e10 ? '中低' : '中';
-      const isHK = /^\d{5}$/.test(q.symbol ?? '');
-
-      let reason = '';
-      if (pe < 15) reason = '低估值+安全边际充足';
-      else if (pe < 25) reason = '估值合理+基本面稳健';
-      else reason = '成长性溢价+市场预期高';
-      if (chg > 2) reason += '+近期动量强势';
-      else if (chg < -2) reason += '+短期超跌反弹机会';
-
-      return {
-        symbol: q.symbol ?? '',
-        name: (q.shortName ?? q.longName ?? '').slice(0, 20),
-        score: Math.min(95, Math.max(30, score)),
-        reason,
-        style,
-        risk,
-      };
-    })
-    .sort((a, b) => b.score - a.score)
+    .map((q) => computeCompositeScore(q))
+    .filter((r): r is CompositeResult => r !== null)
+    .sort((a, b) => b.compositeScore - a.compositeScore)
     .slice(0, 10);
 }
 
-function generateRiskAlerts(quotes: YQuote[]): { symbol: string; name: string; risk: string; level: 'high' | 'medium' }[] {
+function generateRiskAlerts(quotes: YQuote[]): { symbol: string; name: string; risk: string; level: 'high' | 'medium'; score: number }[] {
   return quotes
     .filter((q) => q.regularMarketPrice > 0)
     .map((q) => {
@@ -96,19 +56,24 @@ function generateRiskAlerts(quotes: YQuote[]): { symbol: string; name: string; r
       const chg = q.regularMarketChangePercent ?? 0;
       const high52 = q.fiftyTwoWeekHigh ?? 0;
       const price = q.regularMarketPrice ?? 0;
+      const vol = q.regularMarketVolume ?? 0;
+      const avgVol = q.averageDailyVolume3Month ?? 1;
 
       const risks: string[] = [];
       let level: 'high' | 'medium' = 'medium';
+      let score = 0;
 
-      if (pe > 50) { risks.push('PE过高(>50)'); level = 'high'; }
-      if (chg < -3) { risks.push('近期跌幅较大'); level = 'high'; }
-      if (high52 > 0 && price > 0 && price > high52 * 0.95) { risks.push('接近52周高位'); }
-      if (pe < 0) { risks.push('亏损状态'); level = 'high'; }
+      if (pe > 50) { risks.push('PE过高(>50)'); level = 'high'; score += 3; }
+      if (chg < -3) { risks.push('放量下跌'); level = 'high'; score += 3; }
+      if (high52 > 0 && price > 0 && price > high52 * 0.95) { risks.push('接近52周高位'); score += 2; }
+      if (pe < 0) { risks.push('亏损状态'); level = 'high'; score += 3; }
+      if (vol > avgVol * 2 && chg < 0) { risks.push('放量下跌'); level = 'high'; score += 2; }
+      if (price > 0 && high52 > 0 && price < high52 * 0.6) { risks.push('距52周高回撤>40%'); score += 2; }
 
-      return { symbol: q.symbol ?? '', name: (q.shortName ?? '').slice(0, 16), risk: risks.join('+') || '暂无显著风险信号', level };
+      return { symbol: q.symbol ?? '', name: (q.shortName ?? '').slice(0, 16), risk: risks.join(' · ') || '暂无显著风险信号', level, score };
     })
     .filter((r) => r.risk !== '暂无显著风险信号')
-    .sort((a, b) => (a.level === 'high' ? -1 : 1))
+    .sort((a, b) => b.score - a.score)
     .slice(0, 10);
 }
 
@@ -161,6 +126,7 @@ function localFinancialQA(question: string, quotes: YQuote[]): string {
   const mentioned = valid.filter((s) => question.toUpperCase().includes(s.symbol ?? ''));
   if (mentioned.length > 0) {
     const s = mentioned[0];
+    const composite = computeCompositeScore(s);
     const pe = s.trailingPE;
     const price = s.regularMarketPrice;
     const chg = s.regularMarketChangePercent ?? 0;
@@ -170,6 +136,12 @@ function localFinancialQA(question: string, quotes: YQuote[]): string {
     let resp = `${s.symbol} ${s.shortName} 当前价: ${price?.toFixed(2)} | ${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%`;
     if (pe && pe > 0) resp += `\nPE(TTM): ${pe.toFixed(1)} (${pe < 15 ? '低估' : pe < 25 ? '合理' : pe < 40 ? '偏高' : '高估'})`;
     resp += `\n市值: ${cap}亿 | 52周区间: ${low52.toFixed(1)}-${high52.toFixed(1)}`;
+    if (composite) {
+      resp += `\n\n综合评级: ${composite.rating} (${composite.compositeScore.toFixed(1)}/10) 置信度: ${composite.confidence}`;
+      resp += `\n基本面 ${composite.fundamentalScore.toFixed(1)} | 技术面 ${composite.technicalScore.toFixed(1)} | 情绪面 ${composite.sentimentScore.toFixed(1)}`;
+      resp += `\n入场: ${composite.entryLevels.aggressive}/${composite.entryLevels.moderate}/${composite.entryLevels.conservative}`;
+      resp += `\n目标: ${composite.exitTargets.target1}/${composite.exitTargets.target2}/${composite.exitTargets.target3} | 止损: ${composite.stopLoss}`;
+    }
     return resp;
   }
 
@@ -452,15 +424,20 @@ export default function Screener() {
             {/* Market Stats */}
             <div className="dashboard-grid fixed-3col mb-4">
               <div className="card" style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>AI 综合评分</div>
-                <div className="stat-value" style={{ fontSize: '28px', marginTop: 8, color: 'var(--color-accent)' }}>
-                  {recommendations.length > 0 ? `${recommendations[0]?.score}分` : '---'}
+                <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>AI 综合评分 (0-10)</div>
+                <div className="stat-value" style={{ fontSize: '32px', marginTop: 8, color: (() => {
+                  const s = recommendations[0]?.compositeScore ?? 0;
+                  return s >= 8 ? 'var(--color-up)' : s >= 6.5 ? 'var(--color-accent)' : s >= 5 ? 'var(--color-warning)' : 'var(--color-down)';
+                })() }}>
+                  {recommendations.length > 0 ? recommendations[0].compositeScore.toFixed(1) : '---'}
                 </div>
-                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: 4 }}>最佳推荐</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: 4 }}>
+                  {recommendations[0] ? `${recommendations[0].symbol} · ${recommendations[0].rating}` : '加载中'}
+                </div>
               </div>
               <div className="card" style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>市场情绪</div>
-                <div className="stat-value" style={{ fontSize: '28px', marginTop: 8, color: (() => {
+                <div className="stat-value" style={{ fontSize: '32px', marginTop: 8, color: (() => {
                   const up = quotes.filter(s => (s.regularMarketChangePercent ?? 0) > 0).length;
                   const down = quotes.filter(s => (s.regularMarketChangePercent ?? 0) < 0).length;
                   return up > down ? 'var(--color-up)' : 'var(--color-down)';
@@ -471,47 +448,118 @@ export default function Screener() {
                     return up > down ? '偏多 ↑' : '偏空 ↓';
                   })()}
                 </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: 4 }}>
+                  ↑{quotes.filter(s => (s.regularMarketChangePercent ?? 0) > 0).length} / ↓{quotes.filter(s => (s.regularMarketChangePercent ?? 0) < 0).length}
+                </div>
               </div>
               <div className="card" style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>风险信号</div>
-                <div className="stat-value" style={{ fontSize: '28px', marginTop: 8, color: riskAlerts.length > 0 ? 'var(--color-down)' : 'var(--color-up)' }}>
+                <div className="stat-value" style={{ fontSize: '32px', marginTop: 8, color: riskAlerts.length > 3 ? 'var(--color-down)' : 'var(--color-up)' }}>
                   {riskAlerts.length}只
                 </div>
-                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: 4 }}>{riskAlerts.length < 5 ? '风险可控' : '需关注'}</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: 4 }}>
+                  {riskAlerts.length < 3 ? '风险可控' : riskAlerts.length < 6 ? '适度关注' : '需警惕'}
+                </div>
               </div>
             </div>
 
-            {/* AI Recommendations */}
+            {/* AI Recommendations with Multi-Factor Scoring */}
             <div className="card mb-4">
-              <div className="card-title mb-4">AI 股票推荐（基于实时数据自动评分）</div>
-              <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: 12 }}>
-                评分维度：PE估值 + 市值规模 + 短期动量 + 安全性。满分100分，仅供参考。
+              <div className="card-title mb-2">AI 股票推荐（40%基本面 + 30%技术面 + 30%情绪面）</div>
+              <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: 16 }}>
+                复合评分 · 3档入场价位 · 3档离场目标 · 止损位 · 数据来源: Yahoo Finance
               </div>
               {recommendations.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-tertiary)' }}>加载中...</div>
               ) : (
-                <div style={{ display: 'grid', gap: '12px' }}>
-                  {recommendations.map((rec) => (
-                    <div key={rec.symbol} className="card" style={{ padding: '12px 16px' }}>
-                      <div className="flex justify-between items-start">
-                        <div className="flex gap-3 items-center">
-                          <span style={{ fontWeight: 700, fontSize: '16px', color: 'var(--color-accent)' }}>{rec.symbol}</span>
-                          <span style={{ fontSize: '13px' }}>{rec.name}</span>
-                          <span className="badge" style={{
-                            background: rec.score >= 80 ? 'var(--color-up-bg)' : rec.score >= 60 ? '#d2992222' : 'var(--bg-tertiary)',
-                            color: rec.score >= 80 ? 'var(--color-up)' : rec.score >= 60 ? 'var(--color-warning)' : 'var(--text-secondary)',
-                          }}>{rec.score}分</span>
+                <div style={{ display: 'grid', gap: '16px' }}>
+                  {recommendations.map((rec) => {
+                    const scoreColor = rec.compositeScore >= 8 ? 'var(--color-up)' :
+                      rec.compositeScore >= 6.5 ? 'var(--color-accent)' :
+                      rec.compositeScore >= 5 ? 'var(--color-warning)' : 'var(--color-down)';
+                    const ratingBg = rec.rating === 'STRONG BUY' ? 'var(--color-up-bg)' :
+                      rec.rating === 'BUY' ? 'var(--color-accent-bg)' :
+                      rec.rating === 'WATCH·HOLD' ? '#d2992222' : 'var(--color-down-bg)';
+                    const ratingColor = rec.rating === 'STRONG BUY' ? 'var(--color-up)' :
+                      rec.rating === 'BUY' ? 'var(--color-accent)' :
+                      rec.rating === 'WATCH·HOLD' ? 'var(--color-warning)' : 'var(--color-down)';
+                    return (
+                      <div key={rec.symbol} style={{
+                        background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
+                        borderRadius: 'var(--radius-lg)', padding: '16px 20px',
+                      }}>
+                        {/* Header row */}
+                        <div className="flex justify-between items-start mb-3">
+                          <div className="flex gap-3 items-center">
+                            <span style={{ fontWeight: 700, fontSize: '18px', color: 'var(--color-accent)' }}>{rec.symbol}</span>
+                            <span style={{ fontSize: '14px', color: 'var(--text-primary)' }}>{rec.name}</span>
+                            <span className="badge" style={{ background: ratingBg, color: ratingColor, fontSize: '12px', fontWeight: 600 }}>
+                              {rec.rating} ({rec.compositeScore.toFixed(1)})
+                            </span>
+                            <span className="badge" style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)', fontSize: '10px' }}>
+                              置信度: {rec.confidence}
+                            </span>
+                          </div>
                         </div>
-                        <div className="flex gap-2">
-                          <span className="badge" style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}>{rec.style}</span>
-                          <span className="badge" style={{ background: 'var(--color-accent-bg)', color: 'var(--color-accent)' }}>风险: {rec.risk}</span>
+
+                        {/* Score breakdown bar */}
+                        <div className="flex gap-2 mb-3" style={{ alignItems: 'center' }}>
+                          <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', width: 56 }}>基本面</span>
+                          <div style={{ flex: 1, height: 6, background: 'var(--bg-tertiary)', borderRadius: 3, overflow: 'hidden' }}>
+                            <div style={{ width: `${rec.fundamentalScore * 10}%`, height: '100%', background: 'var(--color-accent)', borderRadius: 3, transition: 'width 0.6s var(--ease-out-expo)' }} />
+                          </div>
+                          <span style={{ fontSize: '11px', fontWeight: 600, width: 28, textAlign: 'right' }}>{rec.fundamentalScore.toFixed(1)}</span>
+                        </div>
+                        <div className="flex gap-2 mb-3" style={{ alignItems: 'center' }}>
+                          <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', width: 56 }}>技术面</span>
+                          <div style={{ flex: 1, height: 6, background: 'var(--bg-tertiary)', borderRadius: 3, overflow: 'hidden' }}>
+                            <div style={{ width: `${rec.technicalScore * 10}%`, height: '100%', background: 'var(--color-purple)', borderRadius: 3, transition: 'width 0.6s var(--ease-out-expo)' }} />
+                          </div>
+                          <span style={{ fontSize: '11px', fontWeight: 600, width: 28, textAlign: 'right' }}>{rec.technicalScore.toFixed(1)}</span>
+                        </div>
+                        <div className="flex gap-2 mb-3" style={{ alignItems: 'center' }}>
+                          <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', width: 56 }}>情绪面</span>
+                          <div style={{ flex: 1, height: 6, background: 'var(--bg-tertiary)', borderRadius: 3, overflow: 'hidden' }}>
+                            <div style={{ width: `${rec.sentimentScore * 10}%`, height: '100%', background: 'var(--color-green)', borderRadius: 3, transition: 'width 0.6s var(--ease-out-expo)' }} />
+                          </div>
+                          <span style={{ fontSize: '11px', fontWeight: 600, width: 28, textAlign: 'right' }}>{rec.sentimentScore.toFixed(1)}</span>
+                        </div>
+
+                        {/* Entry/Exit levels */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+                          <div style={{ background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', padding: '10px' }}>
+                            <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginBottom: 4, textTransform: 'uppercase' }}>入场价位</div>
+                            <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)' }}>
+                              <span style={{ color: 'var(--color-up)' }}>激进 {rec.entryLevels.aggressive}</span><br />
+                              <span style={{ color: 'var(--color-accent)' }}>适中 {rec.entryLevels.moderate}</span><br />
+                              <span style={{ color: 'var(--color-warning)' }}>保守 {rec.entryLevels.conservative}</span>
+                            </div>
+                          </div>
+                          <div style={{ background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', padding: '10px' }}>
+                            <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginBottom: 4, textTransform: 'uppercase' }}>离场目标</div>
+                            <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)' }}>
+                              <span style={{ color: 'var(--color-up)' }}>T1 {rec.exitTargets.target1}</span><br />
+                              <span style={{ color: 'var(--color-accent)' }}>T2 {rec.exitTargets.target2}</span><br />
+                              <span style={{ color: 'var(--color-purple)' }}>T3 {rec.exitTargets.target3}</span>
+                            </div>
+                          </div>
+                          <div style={{ background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', padding: '10px' }}>
+                            <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginBottom: 4, textTransform: 'uppercase' }}>风控</div>
+                            <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)' }}>
+                              <span style={{ color: 'var(--color-down)' }}>止损 {rec.stopLoss}</span><br />
+                              <span style={{ color: 'var(--text-secondary)' }}>
+                                盈亏比 {rec.riskReward.t1}/{rec.riskReward.t2}/{rec.riskReward.t3}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: 12, lineHeight: 1.5 }}>
+                          {rec.summary}
                         </div>
                       </div>
-                      <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: 8 }}>
-                        {rec.reason}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -540,7 +588,7 @@ export default function Screener() {
                 </table>
               )}
               <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: 8 }}>
-                ⚠️ 风险评分基于 PE、涨跌幅、52周位置等定量指标，仅供参考不构成投资建议。
+                风险评分基于 PE、涨跌幅、52周位置、成交量等定量指标，仅供参考不构成投资建议。
               </div>
             </div>
           </div>
