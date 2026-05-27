@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useStore } from '../stores/useStore';
-import { hotStocks, getStockPrice } from '../utils/mockData';
+import { hotStocks } from '../utils/mockData';
+import { useQuotes } from '../hooks/useStockData';
 
 export default function Tools() {
   const [activeTab, setActiveTab] = useState('watchlist');
@@ -188,30 +189,34 @@ function HoldingsPanel() {
   const [buyForm, setBuyForm] = useState({ symbol: '', quantity: 100, price: 0 });
   const [capitalInput, setCapitalInput] = useState(String(initialCapital));
 
-  const totalValue = holdings.reduce((sum, h) => {
-    const currentPrice = getStockPrice(h.symbol);
-    return sum + currentPrice * h.quantity;
-  }, 0);
+  // Fetch real-time prices for all holding symbols
+  const holdingSymbols = holdings.map((h) => h.symbol);
+  const { quotes } = useQuotes(holdingSymbols, 30_000);
 
-  const totalPL = holdings.reduce((sum, h) => {
-    const currentPrice = getStockPrice(h.symbol);
-    return sum + (currentPrice - h.buyPrice) * h.quantity;
-  }, 0);
+  const getPrice = (symbol: string): number => {
+    const q = quotes.find((x) => x.symbol === symbol);
+    if (q?.regularMarketPrice) return q.regularMarketPrice;
+    // fallback to mock
+    const mock = hotStocks.find((s) => s.symbol === symbol);
+    return mock?.price ?? 0;
+  };
 
+  const totalValue = holdings.reduce((sum, h) => sum + getPrice(h.symbol) * h.quantity, 0);
+  const totalPL = holdings.reduce((sum, h) => sum + (getPrice(h.symbol) - h.buyPrice) * h.quantity, 0);
   const totalAssets = cashBalance + totalValue;
   const totalReturn = initialCapital > 0 ? ((totalAssets - initialCapital) / initialCapital * 100) : 0;
 
   const handleBuy = () => {
-    const stock = hotStocks.find((s) => s.symbol === buyForm.symbol);
-    if (!stock) return;
-    const price = buyForm.price > 0 ? buyForm.price : stock.price;
+    const symbol = buyForm.symbol.toUpperCase();
+    const quote = quotes.find((q) => q.symbol === symbol);
+    const mockStock = hotStocks.find((s) => s.symbol === symbol);
+    if (!quote && !mockStock) return;
+    const price = buyForm.price > 0 ? buyForm.price : (quote?.regularMarketPrice ?? mockStock?.price ?? 0);
+    const name = quote?.shortName ?? mockStock?.name ?? symbol;
+    const market = quote?.exchangeName === 'HKG' ? 'HK' as const : 'US' as const;
     addHolding({
-      symbol: stock.symbol,
-      name: stock.name,
-      buyPrice: price,
-      quantity: buyForm.quantity,
-      buyDate: new Date().toISOString().split('T')[0],
-      market: stock.market,
+      symbol, name, buyPrice: price, quantity: buyForm.quantity,
+      buyDate: new Date().toISOString().split('T')[0], market,
     });
     setShowBuy(false);
     setBuyForm({ symbol: '', quantity: 100, price: 0 });
@@ -303,9 +308,9 @@ function HoldingsPanel() {
             </thead>
             <tbody>
               {holdings.map((h) => {
-                const cp = getStockPrice(h.symbol);
+                const cp = getPrice(h.symbol);
                 const pl = (cp - h.buyPrice) * h.quantity;
-                const plPct = cp > 0 ? ((cp - h.buyPrice) / h.buyPrice * 100) : 0;
+                const plPct = h.buyPrice > 0 ? ((cp - h.buyPrice) / h.buyPrice * 100) : 0;
                 return (
                   <tr key={h.id}>
                     <td style={{ color: 'var(--color-accent)' }}>{h.symbol}</td>

@@ -1,14 +1,43 @@
-import { useEffect, useRef, useState } from 'react';
-import { createChart, ColorType, type IChartApi } from 'lightweight-charts';
-import { hotStocks, generateCandles, getStockInfo } from '../utils/mockData';
-import type { Stock } from '../stores/useStore';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { createChart, ColorType, type IChartApi, type ISeriesApi, type CandlestickData, type HistogramData, type Time } from 'lightweight-charts';
+import { useQuotes, useChart, DEFAULT_HK_STOCKS, DEFAULT_US_STOCKS } from '../hooks/useStockData';
+import { useSearch } from '../hooks/useStockData';
+import type { YQuote } from '../services/yahooFinance';
+
+const ALL_STOCKS = [...DEFAULT_HK_STOCKS, ...DEFAULT_US_STOCKS];
+
+const PERIODS: { label: string; range: string; interval: string }[] = [
+  { label: '1D', range: '1d', interval: '5m' },
+  { label: '5D', range: '5d', interval: '15m' },
+  { label: '1M', range: '1mo', interval: '1h' },
+  { label: '3M', range: '3mo', interval: '1d' },
+  { label: '6M', range: '6mo', interval: '1d' },
+  { label: '1Y', range: '1y', interval: '1d' },
+  { label: '2Y', range: '2y', interval: '1wk' },
+];
 
 export default function Market() {
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstance = useRef<IChartApi | null>(null);
-  const [selectedStock, setSelectedStock] = useState<Stock>(hotStocks[0]);
-  const [activePeriod, setActivePeriod] = useState('1D');
+  const candleSeries = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const volumeSeries = useRef<ISeriesApi<'Histogram'> | null>(null);
 
+  const [selectedSymbol, setSelectedSymbol] = useState('00700');
+  const [activePeriod, setActivePeriod] = useState(4); // index into PERIODS
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+
+  const { quotes } = useQuotes(ALL_STOCKS, 30_000);
+  const { quotes: searchQuotes } = useQuotes(
+    ALL_STOCKS.filter((s) => s.includes(searchQuery.toUpperCase())),
+    60_000
+  );
+  const { candles } = useChart(selectedSymbol, PERIODS[activePeriod].range, PERIODS[activePeriod].interval);
+  const { search, results: searchResults, loading: searchLoading } = useSearch();
+
+  const selectedQuote = quotes.find((q) => q.symbol === selectedSymbol);
+
+  // Build chart
   useEffect(() => {
     if (!chartRef.current) return;
 
@@ -28,52 +57,29 @@ export default function Market() {
         vertLine: { color: '#58a6ff', style: 2, width: 1, labelBackgroundColor: '#58a6ff' },
         horzLine: { color: '#58a6ff', style: 2, width: 1, labelBackgroundColor: '#58a6ff' },
       },
-      rightPriceScale: {
-        borderColor: '#30363d',
-      },
-      timeScale: {
-        borderColor: '#30363d',
-        timeVisible: true,
-        secondsVisible: false,
-      },
+      rightPriceScale: { borderColor: '#30363d' },
+      timeScale: { borderColor: '#30363d', timeVisible: true },
     });
 
-    const candleSeries = chart.addCandlestickSeries({
-      upColor: '#26a69a',
-      downColor: '#ef5350',
-      borderDownColor: '#ef5350',
-      borderUpColor: '#26a69a',
-      wickDownColor: '#ef5350',
-      wickUpColor: '#26a69a',
+    const cs = chart.addCandlestickSeries({
+      upColor: '#26a69a', downColor: '#ef5350',
+      borderDownColor: '#ef5350', borderUpColor: '#26a69a',
+      wickDownColor: '#ef5350', wickUpColor: '#26a69a',
     });
 
-    const volumeSeries = chart.addHistogramSeries({
+    const vs = chart.addHistogramSeries({
       color: '#26a69a33',
       priceFormat: { type: 'volume' },
       priceScaleId: '',
     });
+    vs.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
 
-    volumeSeries.priceScale().applyOptions({
-      scaleMargins: { top: 0.8, bottom: 0 },
-    });
-
-    const candles = generateCandles(180);
-    candleSeries.setData(candles);
-    volumeSeries.setData(
-      candles.map((c) => ({
-        time: c.time,
-        value: c.volume,
-        color: c.close >= c.open ? '#26a69a44' : '#ef535044',
-      }))
-    );
-
-    chart.timeScale().fitContent();
     chartInstance.current = chart;
+    candleSeries.current = cs;
+    volumeSeries.current = vs;
 
     const handleResize = () => {
-      if (chartRef.current) {
-        chart.applyOptions({ width: chartRef.current.clientWidth });
-      }
+      if (chartRef.current) chart.applyOptions({ width: chartRef.current.clientWidth });
     };
     window.addEventListener('resize', handleResize);
 
@@ -83,57 +89,143 @@ export default function Market() {
     };
   }, []);
 
-  const stock = selectedStock;
+  // Update chart data when candles change
+  useEffect(() => {
+    if (!candleSeries.current || !volumeSeries.current || candles.length === 0) return;
+    const candleData: CandlestickData[] = candles.map((c) => ({
+      time: c.time as Time,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+    }));
+    const volData: HistogramData[] = candles.map((c) => ({
+      time: c.time as Time,
+      value: c.volume,
+      color: c.close >= c.open ? '#26a69a44' : '#ef535044',
+    }));
+    candleSeries.current.setData(candleData);
+    volumeSeries.current.setData(volData);
+    chartInstance.current?.timeScale().fitContent();
+  }, [candles]);
+
+  const handleSearch = useCallback((q: string) => {
+    setSearchQuery(q);
+    if (q.trim()) {
+      search(q);
+      setShowSearch(true);
+    } else {
+      setShowSearch(false);
+    }
+  }, [search]);
+
+  const stockList = searchQuery ? searchQuotes : quotes;
+
+  const q = selectedQuote;
+  const price = q?.regularMarketPrice ?? 0;
+  const change = q?.regularMarketChange ?? 0;
+  const changePct = q?.regularMarketChangePercent ?? 0;
 
   return (
     <div>
       <div className="page-header">
         <h1 className="page-title">实时行情</h1>
-        <p className="page-desc">个股分时 · K线图 · 盘口数据</p>
+        <p className="page-desc">个股K线 · 盘口数据 · Yahoo Finance 实时数据</p>
       </div>
 
       <div style={{ padding: '0 28px 20px' }}>
-        {/* Stock Selector */}
+        {/* Search + Stock Selector */}
         <div className="card mb-4">
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: 12 }}>
+            <div style={{ position: 'relative', flex: 1 }}>
+              <input
+                className="input w-full"
+                placeholder="搜索股票代码或名称...(如 Tencent / AAPL / 00700)"
+                value={searchQuery}
+                onChange={(e) => handleSearch(e.target.value)}
+                onFocus={() => searchQuery && setShowSearch(true)}
+                onBlur={() => setTimeout(() => setShowSearch(false), 200)}
+              />
+              {showSearch && searchResults.length > 0 && (
+                <div style={{
+                  position: 'absolute', top: '100%', left: 0, right: 0,
+                  background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)',
+                  borderRadius: 'var(--radius-sm)', zIndex: 100, maxHeight: 200, overflow: 'auto',
+                }}>
+                  {searchResults.map((r) => (
+                    <div
+                      key={r.symbol}
+                      style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '13px' }}
+                      className="sidebar-item"
+                      onClick={() => {
+                        setSelectedSymbol(r.symbol);
+                        setSearchQuery('');
+                        setShowSearch(false);
+                      }}
+                    >
+                      <span style={{ color: 'var(--color-accent)' }}>{r.symbol}</span>
+                      {' '}{r.shortName}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            {hotStocks.map((s) => (
-              <button
-                key={s.symbol}
-                className={`btn ${selectedStock.symbol === s.symbol ? 'btn-primary' : ''}`}
-                onClick={() => setSelectedStock(s)}
-              >
-                {s.symbol} {s.name}
-              </button>
-            ))}
+            {stockList.slice(0, 12).map((item: any) => {
+              const sym = item.symbol ?? '';
+              const name = item.shortName ?? item.name ?? '';
+              const chg = item.regularMarketChangePercent ?? item.changePercent ?? 0;
+              return (
+                <button
+                  key={sym}
+                  className={`btn btn-sm ${selectedSymbol === sym ? 'btn-primary' : ''}`}
+                  onClick={() => setSelectedSymbol(sym)}
+                >
+                  {sym}
+                  <span className={chg >= 0 ? 'color-up' : 'color-down'} style={{ fontSize: '10px' }}>
+                    {chg != null ? `${chg >= 0 ? '+' : ''}${chg.toFixed(1)}%` : ''}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
         {/* Quote Summary */}
         <div className="card mb-4">
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '40px' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '40px', flexWrap: 'wrap' }}>
             <div>
-              <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{stock.symbol} {stock.name}</div>
+              <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
+                {selectedSymbol} {q?.shortName ?? q?.longName ?? ''}
+              </div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px', marginTop: 4 }}>
-                <span className="stat-value" style={{ fontSize: '36px' }}>{stock.price.toFixed(2)}</span>
-                <span className={`stat-change ${stock.changePercent >= 0 ? 'color-up' : 'color-down'}`} style={{ fontSize: '18px' }}>
-                  {stock.change >= 0 ? '+' : ''}{stock.change.toFixed(2)} ({stock.changePercent >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%)
+                <span className="stat-value" style={{ fontSize: '36px' }}>
+                  {price ? price.toFixed(2) : '---'}
+                </span>
+                <span className={`stat-change ${changePct >= 0 ? 'color-up' : 'color-down'}`} style={{ fontSize: '18px' }}>
+                  {change ? `${change >= 0 ? '+' : ''}${change.toFixed(2)}` : ''}
+                  {changePct ? ` (${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%)` : ''}
                 </span>
               </div>
+              {q?.currency && (
+                <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>货币: {q.currency}</span>
+              )}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '24px', flex: 1 }}>
               {[
-                { label: '开盘', value: stock.open.toFixed(2) },
-                { label: '昨收', value: stock.prevClose.toFixed(2) },
-                { label: '最高', value: stock.high.toFixed(2) },
-                { label: '最低', value: stock.low.toFixed(2) },
-                { label: '成交量', value: `${(stock.volume / 10000).toFixed(0)}万` },
-                { label: '市值', value: stock.marketCap ? `${(stock.marketCap / 1e8).toFixed(0)}亿` : '-' },
-                { label: 'PE(TTM)', value: stock.pe?.toFixed(1) ?? '-' },
-                { label: '市场', value: stock.market === 'HK' ? '港股' : '美股' },
+                { label: '开盘', value: q?.regularMarketOpen?.toFixed(2) },
+                { label: '昨收', value: q?.regularMarketPreviousClose?.toFixed(2) },
+                { label: '最高', value: q?.regularMarketDayHigh?.toFixed(2) },
+                { label: '最低', value: q?.regularMarketDayLow?.toFixed(2) },
+                { label: '成交量', value: q?.regularMarketVolume ? `${(q.regularMarketVolume / 10000).toFixed(0)}万` : undefined },
+                { label: '市值', value: q?.marketCap ? `${(q.marketCap / 1e8).toFixed(0)}亿` : undefined },
+                { label: 'PE(TTM)', value: q?.trailingPE?.toFixed(1) },
+                { label: '52周高低', value: q?.fiftyTwoWeekHigh ? `${q.fiftyTwoWeekHigh.toFixed(1)} / ${q.fiftyTwoWeekLow?.toFixed(1)}` : undefined },
               ].map((item) => (
                 <div key={item.label}>
                   <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{item.label}</div>
-                  <div style={{ fontSize: '14px', fontWeight: 500, marginTop: 2 }}>{item.value}</div>
+                  <div style={{ fontSize: '14px', fontWeight: 500, marginTop: 2 }}>{item.value ?? '---'}</div>
                 </div>
               ))}
             </div>
@@ -142,16 +234,21 @@ export default function Market() {
 
         {/* Period Selector */}
         <div className="card mb-4">
-          <div className="tabs" style={{ display: 'inline-flex' }}>
-            {['1D', '5D', '1M', '3M', '6M', '1Y'].map((p) => (
-              <button key={p} className={`tab ${activePeriod === p ? 'active' : ''}`} onClick={() => setActivePeriod(p)}>
-                {p}
-              </button>
-            ))}
-          </div>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
-            <button className="btn btn-sm">前复权</button>
-            <button className="btn btn-sm">对数坐标</button>
+          <div className="flex justify-between items-center">
+            <div className="tabs" style={{ display: 'inline-flex' }}>
+              {PERIODS.map((p, i) => (
+                <button
+                  key={p.label}
+                  className={`tab ${activePeriod === i ? 'active' : ''}`}
+                  onClick={() => setActivePeriod(i)}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
+              {candles.length > 0 ? `${candles.length} 根K线` : '加载中...'}
+            </span>
           </div>
         </div>
 
@@ -161,36 +258,42 @@ export default function Market() {
         </div>
 
         {/* Bid/Ask */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-          <div className="card">
-            <div className="card-header"><span className="card-title">卖盘五档</span></div>
-            <table className="data-table">
-              <thead><tr><th>价格</th><th>数量</th></tr></thead>
-              <tbody>
-                {[5,4,3,2,1].map((i) => (
-                  <tr key={`ask-${i}`}>
-                    <td style={{ color: 'var(--color-down)' }}>{(stock.price + i * 0.02).toFixed(2)}</td>
-                    <td>{(Math.random() * 50000 + 10000).toFixed(0)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {q && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <div className="card">
+              <div className="card-header"><span className="card-title">卖盘</span></div>
+              <table className="data-table">
+                <thead><tr><th>价格</th><th>数量</th></tr></thead>
+                <tbody>
+                  {q.ask ? (
+                    <tr>
+                      <td style={{ color: 'var(--color-down)' }}>{q.ask.toFixed(2)}</td>
+                      <td>{q.askSize ? (q.askSize / 100).toFixed(0) : '---'}</td>
+                    </tr>
+                  ) : (
+                    <tr><td colSpan={2} style={{ color: 'var(--text-tertiary)', textAlign: 'center' }}>暂无盘口数据</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="card">
+              <div className="card-header"><span className="card-title">买盘</span></div>
+              <table className="data-table">
+                <thead><tr><th>价格</th><th>数量</th></tr></thead>
+                <tbody>
+                  {q.bid ? (
+                    <tr>
+                      <td style={{ color: 'var(--color-up)' }}>{q.bid.toFixed(2)}</td>
+                      <td>{q.bidSize ? (q.bidSize / 100).toFixed(0) : '---'}</td>
+                    </tr>
+                  ) : (
+                    <tr><td colSpan={2} style={{ color: 'var(--text-tertiary)', textAlign: 'center' }}>暂无盘口数据</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
-          <div className="card">
-            <div className="card-header"><span className="card-title">买盘五档</span></div>
-            <table className="data-table">
-              <thead><tr><th>价格</th><th>数量</th></tr></thead>
-              <tbody>
-                {[1,2,3,4,5].map((i) => (
-                  <tr key={`bid-${i}`}>
-                    <td style={{ color: 'var(--color-up)' }}>{(stock.price - i * 0.02).toFixed(2)}</td>
-                    <td>{(Math.random() * 50000 + 10000).toFixed(0)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );

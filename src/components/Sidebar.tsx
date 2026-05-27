@@ -72,7 +72,7 @@ export default function Sidebar() {
 
       <div style={{ marginTop: 'auto', padding: '16px 12px' }}>
         <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-          Monn v1.0.0
+          Monn v1.1.0
         </div>
       </div>
     </aside>

@@ -1,6 +1,6 @@
 {
   "name": "monn",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Monn - Smart Stock Analysis Tool for HK/US Markets",
   "main": "dist-electron/main.js",
   "scripts": {
