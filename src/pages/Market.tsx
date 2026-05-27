@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { createChart, ColorType, type IChartApi, type ISeriesApi, type CandlestickData, type HistogramData, type Time } from 'lightweight-charts';
 import { useQuotes, useChart, ALL_HK_STOCKS, ALL_US_STOCKS } from '../hooks/useStockData';
 import { useSearch } from '../hooks/useStockData';
+import { useStore } from '../stores/useStore';
 import type { YQuote } from '../services/yahooFinance';
 
 const ALL_STOCKS = [...ALL_HK_STOCKS, ...ALL_US_STOCKS];
@@ -34,6 +35,13 @@ export default function Market() {
   const [marketFilter, setMarketFilter] = useState<'ALL' | 'HK' | 'US'>('ALL');
   const [showAllStocks, setShowAllStocks] = useState(false);
   const [fetchAll, setFetchAll] = useState(false);
+
+  const setSelectedStockSymbol = useStore((s) => s.setSelectedStockSymbol);
+
+  const selectStock = (sym: string) => {
+    setSelectedSymbol(sym);
+    setSelectedStockSymbol(sym);
+  };
 
   // Only fetch full list when user expands, to avoid rate limiting
   const fetchSymbols = fetchAll ? ALL_STOCKS : INITIAL_STOCKS;
@@ -173,7 +181,7 @@ export default function Market() {
                   {searchResults.map((r) => (
                     <div key={r.symbol} style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '13px' }}
                       className="sidebar-item"
-                      onClick={() => { setSelectedSymbol(r.symbol); setSearchQuery(''); setShowSearch(false); }}>
+                      onClick={() => { selectStock(r.symbol); setSearchQuery(''); setShowSearch(false); }}>
                       <span style={{ color: 'var(--color-accent)' }}>{r.symbol}</span> {r.shortName}
                     </div>
                   ))}
@@ -209,7 +217,7 @@ export default function Market() {
               return (
                 <div
                   key={sym}
-                  onClick={() => setSelectedSymbol(sym)}
+                  onClick={() => selectStock(sym)}
                   style={{
                     background: isSelected ? 'var(--bg-active)' : 'var(--bg-tertiary)',
                     border: `1px solid ${isSelected ? 'var(--color-accent)' : 'var(--border-subtle)'}`,

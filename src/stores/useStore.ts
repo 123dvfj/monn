@@ -79,6 +79,10 @@ interface AppState {
   // Screener settings
   screenerConditions: Record<string, any>;
   setScreenerConditions: (conditions: Record<string, any>) => void;
+
+  // Cross-page stock selection
+  selectedStockSymbol: string;
+  setSelectedStockSymbol: (symbol: string) => void;
 }
 
 let noteId = 0;
@@ -179,4 +183,7 @@ export const useStore = create<AppState>((set) => ({
 
   setScreenerConditions: (conditions) =>
     set({ screenerConditions: conditions }),
+
+  selectedStockSymbol: '00700',
+  setSelectedStockSymbol: (symbol) => set({ selectedStockSymbol: symbol }),
 }));

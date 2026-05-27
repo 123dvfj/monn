@@ -1,6 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuotes, ALL_HK_STOCKS, ALL_US_STOCKS } from '../hooks/useStockData';
 import type { YQuote } from '../services/yahooFinance';
+import { useStore } from '../stores/useStore';
 
 const ALL_STOCKS = [...ALL_HK_STOCKS, ...ALL_US_STOCKS];
 
@@ -53,7 +54,15 @@ function generateFlowSummary(q: YQuote | undefined, symbol: string): string[] {
 }
 
 export default function Capital() {
-  const [symbol, setSymbol] = useState('00700');
+  const storeSymbol = useStore((s) => s.selectedStockSymbol);
+  const [symbol, setSymbol] = useState(storeSymbol);
+
+  useEffect(() => {
+    if (storeSymbol && storeSymbol !== symbol) {
+      setSymbol(storeSymbol);
+    }
+  }, [storeSymbol]);
+
   const [searchText, setSearchText] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
 
