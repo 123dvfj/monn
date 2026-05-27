@@ -19,7 +19,7 @@ export default function News() {
     <div>
       <div className="page-header">
         <h1 className="page-title">资讯舆情</h1>
-        <p className="page-desc">实时新闻 · Yahoo Finance {loading ? '加载中...' : `● ${news.length} 条`}</p>
+        <p className="page-desc">{loading ? '实时新闻 · 加载中...' : <><span className="live-dot" />实时新闻 · Yahoo Finance · {news.length} 条</>}</p>
       </div>
 
       <div style={{ padding: '0 28px 20px' }}>

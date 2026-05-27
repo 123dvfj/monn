@@ -87,7 +87,7 @@ export default function Fundamental() {
     <div>
       <div className="page-header">
         <h1 className="page-title">基本面分析</h1>
-        <p className="page-desc">公司概况 · 财务数据 · 估值分析 · AI 智能总结</p>
+        <p className="page-desc"><span className="live-dot" />公司概况 · 财务数据 · 估值分析 · AI 智能总结</p>
       </div>
 
       <div style={{ padding: '0 28px 20px' }}>

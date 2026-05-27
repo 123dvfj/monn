@@ -299,7 +299,7 @@ export default function Screener() {
       <div className="page-header">
         <h1 className="page-title">AI 智能选股</h1>
         <p className="page-desc">
-          {loading ? '加载数据中...' : `条件筛选 · AI推荐 · AI问答 · ${quotes.filter(q => q.regularMarketPrice > 0).length} 只股票可用`}
+          {loading ? '加载数据中...' : <><span className="live-dot" />条件筛选 · AI推荐 · AI问答 · {quotes.filter(q => q.regularMarketPrice > 0).length} 只股票可用</>}
         </p>
       </div>
 

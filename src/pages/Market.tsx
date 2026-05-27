@@ -65,20 +65,20 @@ export default function Market() {
       width: chartRef.current.clientWidth,
       height: 480,
       layout: {
-        background: { type: ColorType.Solid, color: '#161b22' },
+        background: { type: ColorType.Solid, color: '#141a23' },
         textColor: '#8b949e',
       },
       grid: {
-        vertLines: { color: '#21262d' },
-        horzLines: { color: '#21262d' },
+        vertLines: { color: '#1b2330' },
+        horzLines: { color: '#1b2330' },
       },
       crosshair: {
         mode: 0,
         vertLine: { color: '#58a6ff', style: 2, width: 1, labelBackgroundColor: '#58a6ff' },
         horzLine: { color: '#58a6ff', style: 2, width: 1, labelBackgroundColor: '#58a6ff' },
       },
-      rightPriceScale: { borderColor: '#30363d' },
-      timeScale: { borderColor: '#30363d', timeVisible: true },
+      rightPriceScale: { borderColor: 'rgba(255 255 255 / 0.08)' },
+      timeScale: { borderColor: 'rgba(255 255 255 / 0.08)', timeVisible: true },
     });
 
     const cs = chart.addCandlestickSeries({
@@ -148,7 +148,7 @@ export default function Market() {
     <div>
       <div className="page-header">
         <h1 className="page-title">实时行情</h1>
-        <p className="page-desc">个股K线 · 盘口数据 · Yahoo Finance 实时数据</p>
+        <p className="page-desc"><span className="live-dot" />个股K线 · 盘口数据 · Yahoo Finance 实时数据</p>
       </div>
 
       <div style={{ padding: '0 28px 20px' }}>

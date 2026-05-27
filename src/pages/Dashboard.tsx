@@ -14,7 +14,7 @@ export default function Dashboard() {
     <div>
       <div className="page-header">
         <h1 className="page-title">{t('dashboard')}</h1>
-        <p className="page-desc">{t('marketOverview')} {loading ? `(${t('loading')})` : t('online')}</p>
+        <p className="page-desc">{t('marketOverview')} {loading ? `(${t('loading')})` : <><span className="live-dot" />{t('online')}</>}</p>
       </div>
 
       <div className="dashboard-grid" style={{ padding: '0 28px 20px' }}>

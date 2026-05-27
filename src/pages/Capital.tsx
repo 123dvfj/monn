@@ -89,7 +89,7 @@ export default function Capital() {
     <div>
       <div className="page-header">
         <h1 className="page-title">资金筹码</h1>
-        <p className="page-desc">量价关系 · 盘口数据 · 成交量分析 · AI 资金面研判</p>
+        <p className="page-desc"><span className="live-dot" />量价关系 · 盘口数据 · 成交量分析 · AI 资金面研判</p>
       </div>
 
       <div style={{ padding: '0 28px 20px' }}>
