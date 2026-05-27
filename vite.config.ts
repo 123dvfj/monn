@@ -99,6 +99,30 @@ function yahooProxyPlugin(): Plugin {
       server.middlewares.use('/api/yahoo-news', (req, res) => {
         proxyRequest('query2.finance.yahoo.com', req, res, (p) => p.replace(/^\/api\/yahoo-news/, ''));
       });
+
+      // Handle /api/rss/* requests (MarketWatch RSS feed proxy)
+      server.middlewares.use('/api/rss', (req, res) => {
+        const url = req.url ?? '';
+        let targetPath: string;
+        if (url.startsWith('/mw-top')) {
+          targetPath = '/public/rss/mw_topstories';
+        } else {
+          res.writeHead(404);
+          res.end('RSS feed not found');
+          return;
+        }
+        const proxyReq = https.request({
+          hostname: 'feeds.content.dowjones.io',
+          path: targetPath,
+          method: 'GET',
+          headers: { 'User-Agent': 'Mozilla/5.0' },
+        }, (proxyRes) => {
+          res.writeHead(proxyRes.statusCode ?? 200, proxyRes.headers);
+          proxyRes.pipe(res);
+        });
+        proxyReq.on('error', () => { res.writeHead(502); res.end('Proxy error'); });
+        proxyReq.end();
+      });
     },
   };
 }

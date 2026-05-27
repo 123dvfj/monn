@@ -202,20 +202,48 @@ export async function searchStocks(query: string): Promise<YQuote[]> {
 }
 
 export async function fetchNews(symbols: string[] = [], count: number = 20): Promise<YNewsItem[]> {
+  // Try Yahoo Finance news first
   try {
     const ys = symbols.map(toYahooSymbol);
     const url = ys.length > 0
       ? newsApiUrl(`/v1/finance/news?symbols=${ys.join(',')}&count=${count}`)
       : newsApiUrl(`/v1/finance/news?count=${count}`);
     const data = await yahooFetch<any>(url);
-    return (data?.items ?? data?.result ?? []).slice(0, count).map((n: any) => ({
-      title: n.title ?? '',
-      link: n.link ?? n.canonicalUrl?.url ?? '',
-      publisher: n.publisher ?? '',
-      publishedAt: n.pubDate ?? n.publishedAt ?? '',
-      summary: n.summary ?? '',
-      thumbnail: n.thumbnail ?? '',
-    }));
+    const items = data?.items ?? data?.result ?? [];
+    if (items.length > 0) {
+      return items.slice(0, count).map((n: any) => ({
+        title: n.title ?? '',
+        link: n.link ?? n.canonicalUrl?.url ?? '',
+        publisher: n.publisher ?? '',
+        publishedAt: n.pubDate ?? n.publishedAt ?? '',
+        summary: n.summary ?? '',
+        thumbnail: n.thumbnail ?? '',
+      }));
+    }
+  } catch { /* fall through to RSS */ }
+
+  // Fallback: MarketWatch RSS
+  return fetchMarketWatchRSS(count);
+}
+
+async function fetchMarketWatchRSS(count: number): Promise<YNewsItem[]> {
+  try {
+    const url = isDev ? '/api/rss/mw-top' : 'https://feeds.content.dowjones.io/public/rss/mw_topstories';
+    const text = await (await fetch(url)).text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(text, 'application/xml');
+    const items = doc.querySelectorAll('item');
+    const results: YNewsItem[] = [];
+    items.forEach((item) => {
+      if (results.length >= count) return;
+      const title = item.querySelector('title')?.textContent ?? '';
+      const link = item.querySelector('link')?.textContent ?? '';
+      const publisher = item.querySelector('dc\\:creator, creator')?.textContent ?? 'MarketWatch';
+      const pubDate = item.querySelector('pubDate')?.textContent ?? '';
+      const description = item.querySelector('description')?.textContent ?? '';
+      results.push({ title, link, publisher, publishedAt: pubDate, summary: description });
+    });
+    return results;
   } catch {
     return [];
   }
