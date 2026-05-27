@@ -144,71 +144,104 @@ export default function Market() {
       </div>
 
       <div style={{ padding: '0 28px 20px' }}>
-        {/* Search + Stock Selector */}
-        <div className="card mb-4">
+        {/* Visual Stock Picker */}
+        <div className="card mb-4" style={{ padding: '12px' }}>
+          {/* Search + Tabs row */}
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: 12 }}>
             <div style={{ position: 'relative', flex: 1 }}>
               <input
-                className="input w-full"
-                placeholder="搜索股票代码或名称...(如 Tencent / AAPL / 00700)"
+                className="input"
+                placeholder="搜索过滤..."
                 value={searchQuery}
-                onChange={(e) => handleSearch(e.target.value)}
-                onFocus={() => searchQuery && setShowSearch(true)}
-                onBlur={() => setTimeout(() => setShowSearch(false), 200)}
+                onChange={(e) => { setSearchQuery(e.target.value); if (e.target.value) handleSearch(e.target.value); }}
+                style={{ width: '100%', maxWidth: 280 }}
               />
               {showSearch && searchResults.length > 0 && (
                 <div style={{
-                  position: 'absolute', top: '100%', left: 0, right: 0,
+                  position: 'absolute', top: '100%', left: 0, width: 300,
                   background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)',
                   borderRadius: 'var(--radius-sm)', zIndex: 100, maxHeight: 200, overflow: 'auto',
                 }}>
                   {searchResults.map((r) => (
-                    <div
-                      key={r.symbol}
-                      style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '13px' }}
+                    <div key={r.symbol} style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '13px' }}
                       className="sidebar-item"
-                      onClick={() => {
-                        setSelectedSymbol(r.symbol);
-                        setSearchQuery('');
-                        setShowSearch(false);
-                      }}
-                    >
-                      <span style={{ color: 'var(--color-accent)' }}>{r.symbol}</span>
-                      {' '}{r.shortName}
+                      onClick={() => { setSelectedSymbol(r.symbol); setSearchQuery(''); setShowSearch(false); }}>
+                      <span style={{ color: 'var(--color-accent)' }}>{r.symbol}</span> {r.shortName}
                     </div>
                   ))}
                 </div>
               )}
             </div>
+            <div className="tabs">
+              {(['ALL', 'HK', 'US'] as const).map((f) => (
+                <button key={f} className={`tab ${marketFilter === f ? 'active' : ''}`} onClick={() => setMarketFilter(f)}>
+                  {{ ALL: `全部 (${ALL_STOCKS.length})`, HK: '港股', US: '美股' }[f]}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="flex gap-2 mb-3">
-            <button className={`btn btn-sm ${marketFilter === 'ALL' ? 'btn-primary' : ''}`} onClick={() => setMarketFilter('ALL')}>全部 ({ALL_STOCKS.length})</button>
-            <button className={`btn btn-sm ${marketFilter === 'HK' ? 'btn-primary' : ''}`} onClick={() => setMarketFilter('HK')}>港股</button>
-            <button className={`btn btn-sm ${marketFilter === 'US' ? 'btn-primary' : ''}`} onClick={() => setMarketFilter('US')}>美股</button>
-          </div>
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', maxHeight: showAllStocks ? 'none' : 120, overflow: 'hidden', position: 'relative' }}>
+
+          {/* Scrollable Stock Card Grid */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))',
+            gap: '8px',
+            maxHeight: showAllStocks ? 'none' : 280,
+            overflowY: 'auto',
+            padding: '2px',
+          }}>
             {visibleStocks.map((item: any) => {
               const sym = item.symbol ?? '';
-              const name = item.shortName ?? item.name ?? '';
-              const chg = item.regularMarketChangePercent ?? item.changePercent ?? 0;
+              const name = (item.shortName ?? item.name ?? sym).slice(0, 14);
+              const price = item.regularMarketPrice ?? item.price ?? 0;
+              const chgPct = item.regularMarketChangePercent ?? item.changePercent ?? 0;
+              const isHK = /^\d{5}$/.test(sym);
+              const isSelected = selectedSymbol === sym;
+
               return (
-                <button
+                <div
                   key={sym}
-                  className={`btn btn-sm ${selectedSymbol === sym ? 'btn-primary' : ''}`}
                   onClick={() => setSelectedSymbol(sym)}
-                  title={name}
+                  style={{
+                    background: isSelected ? 'var(--bg-active)' : 'var(--bg-tertiary)',
+                    border: `1px solid ${isSelected ? 'var(--color-accent)' : 'var(--border-subtle)'}`,
+                    borderRadius: 'var(--radius-md)',
+                    padding: '10px 12px',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={(e) => !isSelected && (e.currentTarget.style.background = 'var(--bg-hover)')}
+                  onMouseLeave={(e) => !isSelected && (e.currentTarget.style.background = 'var(--bg-tertiary)')}
                 >
-                  {sym}
-                  <span className={chg >= 0 ? 'color-up' : 'color-down'} style={{ fontSize: '10px' }}>
-                    {chg != null ? `${chg >= 0 ? '+' : ''}${chg.toFixed(1)}%` : ''}
-                  </span>
-                </button>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                    <span style={{ fontWeight: 700, fontSize: '13px', color: 'var(--color-accent)' }}>{sym}</span>
+                    <span className="badge" style={{
+                      background: isHK ? '#a371f722' : '#58a6ff22',
+                      color: isHK ? 'var(--color-purple)' : 'var(--color-accent)',
+                      fontSize: '10px',
+                    }}>
+                      {isHK ? 'HK' : 'US'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {name}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                    <span className="font-mono" style={{ fontSize: '14px', fontWeight: 600 }}>
+                      {price ? price.toFixed(2) : '---'}
+                    </span>
+                    <span className={`font-mono ${chgPct >= 0 ? 'color-up' : 'color-down'}`} style={{ fontSize: '12px', fontWeight: 600 }}>
+                      {chgPct >= 0 ? '+' : ''}{chgPct.toFixed(2)}%
+                    </span>
+                  </div>
+                </div>
               );
             })}
           </div>
+
           {stockList.length > 20 && (
             <button
-              className="btn btn-sm mt-2"
+              className="btn btn-sm mt-3"
               onClick={() => setShowAllStocks(!showAllStocks)}
               style={{ width: '100%' }}
             >
