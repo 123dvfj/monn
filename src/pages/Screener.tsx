@@ -5,6 +5,8 @@ import { computeCompositeScore, scoreToRating } from '../utils/scoring';
 import type { CompositeResult } from '../utils/scoring';
 import { useCountUp } from '../hooks/useCountUp';
 import { useT } from '../i18n/I18nContext';
+import { callAI } from '../utils/aiChat';
+import type { AIConfig } from '../utils/aiChat';
 
 interface FilterCondition {
   id: string;
@@ -217,8 +219,14 @@ export default function Screener() {
     { role: 'assistant', content: '你好！我是 Monn AI 助手。我可以基于实时数据回答股票相关问题。\n\n试着问我："市场整体怎么样？"、"哪些股票最低估？"、"ETF行情"、或输入股票代码。' },
   ]);
   const [chatInput, setChatInput] = useState('');
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('monn-ai-apikey') || '');
-  const [apiUrl, setApiUrl] = useState(() => localStorage.getItem('monn-ai-apiurl') || 'https://api.openai.com/v1/chat/completions');
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem('monn_ai_key') || '');
+  const [apiUrl, setApiUrl] = useState(() => localStorage.getItem('monn_ai_url') || 'https://api.openai.com/v1/chat/completions');
+  const [model, setModel] = useState(() => localStorage.getItem('monn_ai_model') || 'gpt-4o-mini');
+  const [provider, setProvider] = useState<'openai' | 'anthropic'>(
+    () => (localStorage.getItem('monn_ai_provider') as 'openai' | 'anthropic') || 'openai'
+  );
+  const [showConfig, setShowConfig] = useState(!apiKey);
+  const [configMsg, setConfigMsg] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
@@ -232,26 +240,18 @@ export default function Screener() {
     // Try remote AI model if API key is configured
     if (apiKey.trim()) {
       try {
-        const res = await fetch(apiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-          body: JSON.stringify({
-            model: 'gpt-3.5-turbo',
-            messages: [
-              { role: 'system', content: `你是一个专业的股票分析助手，可访问以下${quotes.filter(q => q.regularMarketPrice > 0).length}只港美股实时数据。简短回答，中文优先。` },
-              ...chatMessages.map((m) => ({ role: m.role, content: m.content })),
-              { role: 'user', content: userMsg.content },
-            ],
-            max_tokens: 500,
-            temperature: 0.7,
-          }),
-        });
-        const json = await res.json();
-        const reply = json?.choices?.[0]?.message?.content ?? 'AI 模型返回为空，请检查 API 配置。';
+        const aiConfig: AIConfig = { apiKey, apiUrl, model, provider };
+        const systemMsg = `你是一个专业的股票分析助手，可访问以下${quotes.filter(q => q.regularMarketPrice > 0).length}只港美股实时数据。简短回答，中文优先。`;
+        const reply = await callAI(aiConfig, [
+          { role: 'system', content: systemMsg },
+          ...chatMessages.map((m) => ({ role: m.role, content: m.content })),
+          { role: 'user', content: userMsg.content },
+        ], { maxTokens: 500 });
         setChatMessages((prev) => [...prev, { role: 'assistant', content: reply }]);
         return;
-      } catch {
-        // Fall through to local analysis on API failure
+      } catch (e: any) {
+        setChatMessages((prev) => [...prev, { role: 'assistant', content: `远程模型调用失败 (${e.message || '网络错误'})，以下为本地分析结果：\n\n${localFinancialQA(userMsg.content, quotes)}` }]);
+        return;
       }
     }
 
@@ -266,8 +266,24 @@ export default function Screener() {
   };
 
   const saveApiConfig = () => {
-    localStorage.setItem('monn-ai-apikey', apiKey);
-    localStorage.setItem('monn-ai-apiurl', apiUrl);
+    localStorage.setItem('monn_ai_key', apiKey);
+    localStorage.setItem('monn_ai_url', apiUrl);
+    localStorage.setItem('monn_ai_model', model);
+    localStorage.setItem('monn_ai_provider', provider);
+    setConfigMsg('配置已保存');
+    setShowConfig(false);
+    setTimeout(() => setConfigMsg(''), 2000);
+  };
+
+  const handleProviderChange = (p: 'openai' | 'anthropic') => {
+    setProvider(p);
+    if (p === 'anthropic') {
+      setModel('claude-sonnet-4-6');
+      setApiUrl('https://api.anthropic.com/v1/messages');
+    } else {
+      setModel('gpt-4o-mini');
+      setApiUrl('https://api.openai.com/v1/chat/completions');
+    }
   };
 
   const enabledCount = filters.filter((f) => f.enabled).length;
@@ -633,17 +649,47 @@ export default function Screener() {
 
             <div>
               <div className="card mb-4">
-                <div className="card-title mb-3">API 配置（可选）</div>
+                <div className="card-title mb-3" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>API 配置（可选）</span>
+                  <button className="btn btn-sm" onClick={() => setShowConfig(!showConfig)}>
+                    {showConfig ? '收起' : '展开'}
+                  </button>
+                </div>
                 <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: 12 }}>
-                  接入 OpenAI/Claude 等模型获得更智能的回答。不配置则使用本地规则引擎。
+                  接入 OpenAI 兼容接口获得更智能的回答。不配置则使用本地规则引擎。
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <input className="input" placeholder="API URL" value={apiUrl}
-                    onChange={(e) => setApiUrl(e.target.value)} style={{ fontSize: '11px' }} />
-                  <input className="input" type="password" placeholder="API Key" value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)} style={{ fontSize: '11px' }} />
-                  <button className="btn btn-sm w-full" onClick={saveApiConfig}>保存配置</button>
-                </div>
+                {showConfig && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 4 }}>服务商</label>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        {([
+                          ['openai', 'OpenAI/兼容'],
+                          ['anthropic', 'Anthropic'],
+                        ] as const).map(([k, label]) => (
+                          <button
+                            key={k}
+                            className={`btn btn-sm ${provider === k ? 'btn-primary' : ''}`}
+                            onClick={() => handleProviderChange(k)}
+                            style={{ fontSize: 11, padding: '4px 10px' }}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <input className="input" placeholder="API URL" value={apiUrl}
+                      onChange={(e) => setApiUrl(e.target.value)} style={{ fontSize: '11px' }} />
+                    <input className="input" placeholder="模型名称" value={model}
+                      onChange={(e) => setModel(e.target.value)} style={{ fontSize: '11px' }} />
+                    <input className="input" type="password" placeholder="API Key" value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)} style={{ fontSize: '11px' }} />
+                    <button className="btn btn-sm w-full btn-primary" onClick={saveApiConfig}>保存配置</button>
+                    {configMsg && (
+                      <div style={{ fontSize: 11, color: 'var(--color-up)', textAlign: 'center' }}>{configMsg}</div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="card">

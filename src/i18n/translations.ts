@@ -11,6 +11,7 @@ export const zh = {
   marketAnalysis: '行情分析',
   decisionAid: '决策辅助',
   tools: '工具',
+  investmentSim: '投资模拟',
 
   // Sidebar items
   dashboard: '工作台',
@@ -18,6 +19,7 @@ export const zh = {
   technicalAnalysis: '技术分析',
   fundamental: '基本面',
   capitalFlow: '资金筹码',
+  portfolio: '模拟交易',
   smartScreener: 'AI 智能选股',
   newsSentiment: '资讯舆情',
   auxTools: '辅助工具',
@@ -327,11 +329,14 @@ export const en: Record<TranslationKey, string> = {
   marketAnalysis: 'Market Analysis',
   decisionAid: 'Decision Aid',
   tools: 'Tools',
+  investmentSim: 'Invest Sim',
+
   dashboard: 'Dashboard',
   realtimeMarket: 'Market',
   technicalAnalysis: 'Technical',
   fundamental: 'Fundamental',
   capitalFlow: 'Capital Flow',
+  portfolio: 'Portfolio',
   smartScreener: 'AI Screener',
   newsSentiment: 'News',
   auxTools: 'Tools',

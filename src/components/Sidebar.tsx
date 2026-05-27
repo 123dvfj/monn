@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import {
-  LayoutDashboard, TrendingUp, CandlestickChart, FileText,
-  Banknote, Search, Newspaper, Wrench, Globe,
+  LayoutDashboard, TrendingUp, FileText,
+  Banknote, Search, Newspaper, Wrench, Globe, Briefcase,
 } from 'lucide-react';
 import { useT } from '../i18n/I18nContext';
 
@@ -25,9 +25,14 @@ export default function Sidebar() {
       titleKey: 'marketAnalysis',
       items: [
         { path: '/market', labelKey: 'realtimeMarket', icon: <TrendingUp size={16} /> },
-        { path: '/technical', labelKey: 'technicalAnalysis', icon: <CandlestickChart size={16} /> },
         { path: '/fundamental', labelKey: 'fundamental', icon: <FileText size={16} /> },
         { path: '/capital', labelKey: 'capitalFlow', icon: <Banknote size={16} /> },
+      ],
+    },
+    {
+      titleKey: 'investmentSim',
+      items: [
+        { path: '/portfolio', labelKey: 'portfolio', icon: <Briefcase size={16} /> },
       ],
     },
     {

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 
 export interface Stock {
   symbol: string;
@@ -14,16 +15,6 @@ export interface Stock {
   prevClose: number;
   marketCap?: number;
   pe?: number;
-}
-
-export interface Holding {
-  id: string;
-  symbol: string;
-  name: string;
-  buyPrice: number;
-  quantity: number;
-  buyDate: string;
-  market: 'HK' | 'US';
 }
 
 export interface WatchlistGroup {
@@ -58,14 +49,6 @@ interface AppState {
   addToWatchlist: (groupId: string, symbol: string) => void;
   removeFromWatchlist: (groupId: string, symbol: string) => void;
 
-  // Simulated holdings
-  holdings: Holding[];
-  cashBalance: number;
-  initialCapital: number;
-  addHolding: (holding: Omit<Holding, 'id'>) => void;
-  removeHolding: (id: string) => void;
-  resetAccount: (capital: number) => void;
-
   // Trade notes
   tradeNotes: TradeNote[];
   addTradeNote: (note: Omit<TradeNote, 'id'>) => void;
@@ -90,7 +73,9 @@ let alertId = 0;
 let holdingId = 0;
 let groupId = 0;
 
-export const useStore = create<AppState>((set) => ({
+export const useStore = create<AppState>()(
+  persist(
+    (set) => ({
   watchlistGroups: [
     { id: '1', name: '重点关注', stocks: ['00700', '09988', 'AAPL'] },
     { id: '2', name: '短线博弈', stocks: ['01810', 'NVDA'] },
@@ -126,33 +111,6 @@ export const useStore = create<AppState>((set) => ({
       ),
     })),
 
-  holdings: [
-    { id: 'h1', symbol: '00700', name: 'Tencent', buyPrice: 320.5, quantity: 100, buyDate: '2024-01-15', market: 'HK' },
-    { id: 'h2', symbol: 'AAPL', name: 'Apple', buyPrice: 175.0, quantity: 50, buyDate: '2024-03-10', market: 'US' },
-  ],
-  cashBalance: 500000,
-  initialCapital: 1000000,
-
-  addHolding: (h) =>
-    set((state) => ({
-      holdings: [...state.holdings, { ...h, id: `h${++holdingId}` }],
-      cashBalance: state.cashBalance - h.buyPrice * h.quantity,
-    })),
-
-  removeHolding: (id) =>
-    set((state) => {
-      const holding = state.holdings.find((h) => h.id === id);
-      return {
-        holdings: state.holdings.filter((h) => h.id !== id),
-        cashBalance: holding
-          ? state.cashBalance + holding.buyPrice * holding.quantity
-          : state.cashBalance,
-      };
-    }),
-
-  resetAccount: (capital) =>
-    set({ holdings: [], cashBalance: capital, initialCapital: capital }),
-
   tradeNotes: [],
 
   addTradeNote: (note) =>
@@ -186,4 +144,7 @@ export const useStore = create<AppState>((set) => ({
 
   selectedStockSymbol: '00700',
   setSelectedStockSymbol: (symbol) => set({ selectedStockSymbol: symbol }),
-}));
+}),
+    { name: 'monn-tools' }
+  )
+);

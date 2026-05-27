@@ -11,20 +11,19 @@ export default function Tools() {
     <div>
       <div className="page-header">
         <h1 className="page-title">辅助工具</h1>
-        <p className="page-desc">自选管理 · 模拟持仓 · 预警设置 · 交易笔记</p>
+        <p className="page-desc">自选管理 · 预警设置 · 交易笔记</p>
       </div>
 
       <div style={{ padding: '0 28px 20px' }}>
         <div className="tabs mb-4" style={{ display: 'inline-flex' }}>
-          {['watchlist', 'holdings', 'alerts', 'notes'].map((t) => (
+          {['watchlist', 'alerts', 'notes'].map((t) => (
             <button key={t} className={`tab ${activeTab === t ? 'active' : ''}`} onClick={() => setActiveTab(t)}>
-              {{ watchlist: '自选股', holdings: '模拟持仓', alerts: '价格预警', notes: '交易笔记' }[t]}
+              {{ watchlist: '自选股', alerts: '价格预警', notes: '交易笔记' }[t]}
             </button>
           ))}
         </div>
 
         {activeTab === 'watchlist' && <WatchlistPanel />}
-        {activeTab === 'holdings' && <HoldingsPanel />}
         {activeTab === 'alerts' && <AlertsPanel />}
         {activeTab === 'notes' && <NotesPanel />}
       </div>
@@ -187,170 +186,6 @@ function WatchlistPanel() {
               暂无股票，点击"添加股票"开始
             </div>
           )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ==================== Holdings ==================== */
-function HoldingsPanel() {
-  const { holdings, cashBalance, initialCapital, addHolding, removeHolding, resetAccount } = useStore();
-  const [showBuy, setShowBuy] = useState(false);
-  const [buyForm, setBuyForm] = useState({ symbol: '', quantity: 100, price: 0 });
-  const [capitalInput, setCapitalInput] = useState(String(initialCapital));
-
-  // Fetch real-time prices for all holding symbols
-  const holdingSymbols = holdings.map((h) => h.symbol);
-  const { quotes } = useQuotes(holdingSymbols, 30_000);
-
-  const getPrice = (symbol: string): number => {
-    const q = quotes.find((x) => x.symbol === symbol);
-    return q?.regularMarketPrice ?? 0;
-  };
-
-  const totalValue = holdings.reduce((sum, h) => sum + getPrice(h.symbol) * h.quantity, 0);
-  const totalPL = holdings.reduce((sum, h) => sum + (getPrice(h.symbol) - h.buyPrice) * h.quantity, 0);
-  const totalAssets = cashBalance + totalValue;
-  const totalReturn = initialCapital > 0 ? ((totalAssets - initialCapital) / initialCapital * 100) : 0;
-
-  const handleBuy = () => {
-    const symbol = buyForm.symbol.toUpperCase();
-    const quote = quotes.find((q) => q.symbol === symbol);
-    if (!quote) return;
-    const price = buyForm.price > 0 ? buyForm.price : (quote.regularMarketPrice ?? 0);
-    const name = quote.shortName ?? symbol;
-    const isHK = /^\d{5}$/.test(symbol);
-    const market = isHK ? 'HK' as const : 'US' as const;
-    addHolding({
-      symbol, name, buyPrice: price, quantity: buyForm.quantity,
-      buyDate: new Date().toISOString().split('T')[0], market,
-    });
-    setShowBuy(false);
-    setBuyForm({ symbol: '', quantity: 100, price: 0 });
-  };
-
-  return (
-    <div>
-      {/* Account Summary */}
-      <div className="dashboard-grid fixed-3col mb-4">
-        <div className="card" style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>总资产</div>
-          <div className="stat-value" style={{ marginTop: 4 }}>{totalAssets.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</div>
-          <div className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>
-            HKD
-          </div>
-        </div>
-        <div className="card" style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>持仓市值</div>
-          <div className="stat-value" style={{ marginTop: 4 }}>{totalValue.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</div>
-          <div className="text-xs mt-1" style={{ color: 'var(--text-tertiary)' }}>可用资金 {cashBalance.toLocaleString()}</div>
-        </div>
-        <div className="card" style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>总收益</div>
-          <div className={`stat-value ${totalPL >= 0 ? 'color-up' : 'color-down'}`} style={{ marginTop: 4 }}>
-            {totalPL >= 0 ? '+' : ''}{totalPL.toFixed(2)}
-          </div>
-          <div className={`text-xs mt-1 ${totalReturn >= 0 ? 'color-up' : 'color-down'}`}>
-            {totalReturn >= 0 ? '+' : ''}{totalReturn.toFixed(2)}%
-          </div>
-        </div>
-      </div>
-
-      {/* Holdings Table */}
-      <div className="card mb-4">
-        <div className="card-header">
-          <span className="card-title">当前持仓</span>
-          <div className="flex gap-2">
-            <button className="btn btn-sm btn-primary" onClick={() => setShowBuy(true)}>+ 模拟买入</button>
-            <button className="btn btn-sm" onClick={() => resetAccount(Number(capitalInput))}>重置账户</button>
-          </div>
-        </div>
-
-        {showBuy && (
-          <div className="card mb-4" style={{ background: 'var(--bg-tertiary)' }}>
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-              <div>
-                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: 4 }}>股票代码</div>
-                <input
-                  className="input"
-                  placeholder="如 00700"
-                  value={buyForm.symbol}
-                  onChange={(e) => setBuyForm({ ...buyForm, symbol: e.target.value.toUpperCase() })}
-                  style={{ width: 120 }}
-                />
-              </div>
-              <div>
-                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: 4 }}>数量</div>
-                <input
-                  className="input"
-                  type="number"
-                  value={buyForm.quantity}
-                  onChange={(e) => setBuyForm({ ...buyForm, quantity: Number(e.target.value) })}
-                  style={{ width: 100 }}
-                />
-              </div>
-              <div>
-                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: 4 }}>价格 (留空=市价)</div>
-                <input
-                  className="input"
-                  type="number"
-                  placeholder="市价成交"
-                  value={buyForm.price || ''}
-                  onChange={(e) => setBuyForm({ ...buyForm, price: Number(e.target.value) })}
-                  style={{ width: 120 }}
-                />
-              </div>
-              <button className="btn btn-primary" onClick={handleBuy}>确认买入</button>
-              <button className="btn" onClick={() => setShowBuy(false)}>取消</button>
-            </div>
-          </div>
-        )}
-
-        {holdings.length > 0 ? (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>代码</th><th>名称</th><th>成本价</th><th>现价</th><th>数量</th><th>市值</th><th>盈亏</th><th>日期</th><th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {holdings.map((h) => {
-                const cp = getPrice(h.symbol);
-                const pl = (cp - h.buyPrice) * h.quantity;
-                const plPct = h.buyPrice > 0 ? ((cp - h.buyPrice) / h.buyPrice * 100) : 0;
-                return (
-                  <tr key={h.id}>
-                    <td style={{ color: 'var(--color-accent)' }}>{h.symbol}</td>
-                    <td>{h.name}</td>
-                    <td>{h.buyPrice.toFixed(2)}</td>
-                    <td>{cp.toFixed(2)}</td>
-                    <td>{h.quantity}</td>
-                    <td>{(cp * h.quantity).toFixed(2)}</td>
-                    <td className={pl >= 0 ? 'color-up' : 'color-down'}>
-                      {pl >= 0 ? '+' : ''}{pl.toFixed(2)} ({plPct >= 0 ? '+' : ''}{plPct.toFixed(2)}%)
-                    </td>
-                    <td style={{ fontSize: '11px' }}>{h.buyDate}</td>
-                    <td><button className="btn btn-sm btn-danger" onClick={() => removeHolding(h.id)}>卖出</button></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        ) : (
-          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-tertiary)' }}>
-            暂无持仓，点击"模拟买入"开始
-          </div>
-        )}
-      </div>
-
-      {/* Capital Config */}
-      <div className="card">
-        <div className="card-title mb-3">账户设置</div>
-        <div className="flex gap-3 items-center">
-          <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>初始资金:</span>
-          <input className="input" style={{ width: 150 }} value={capitalInput} onChange={(e) => setCapitalInput(e.target.value)} />
-          <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>HKD (重置后生效)</span>
         </div>
       </div>
     </div>
