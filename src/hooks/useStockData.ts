@@ -63,9 +63,9 @@ export const ALL_US_STOCKS = [
   'UBER', 'ABNB', 'SNAP', 'HOOD', 'RBLX',
 ];
 
-// Default display sets (subset for performance)
-export const DEFAULT_HK_STOCKS = ALL_HK_STOCKS.slice(0, 30);
-export const DEFAULT_US_STOCKS = ALL_US_STOCKS.slice(0, 30);
+// Default display sets (full lists - all available)
+export const DEFAULT_HK_STOCKS = ALL_HK_STOCKS;
+export const DEFAULT_US_STOCKS = ALL_US_STOCKS;
 
 // ---- useQuotes: periodic real-time quotes ----
 export function useQuotes(symbols: string[], intervalMs: number = 30_000) {

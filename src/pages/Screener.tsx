@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { hotStocks } from '../utils/mockData';
+import { useQuotes, DEFAULT_HK_STOCKS, DEFAULT_US_STOCKS } from '../hooks/useStockData';
 
 type Condition = {
   id: string;
@@ -30,8 +30,9 @@ const savedStrategies = [
 ];
 
 export default function Screener() {
+  const { quotes } = useQuotes([...DEFAULT_HK_STOCKS, ...DEFAULT_US_STOCKS], 30_000);
   const [activeConditions, setActiveConditions] = useState<string[]>([]);
-  const [results, setResults] = useState(hotStocks);
+  const [results, setResults] = useState<any[]>([]);
 
   const toggleCondition = (id: string) => {
     setActiveConditions((prev) =>
@@ -40,8 +41,7 @@ export default function Screener() {
   };
 
   const runScreener = () => {
-    // Mock: just return all stocks
-    setResults(hotStocks);
+    setResults(quotes.filter((q) => q.regularMarketPrice > 0));
   };
 
   return (
@@ -107,19 +107,28 @@ export default function Screener() {
                   </tr>
                 </thead>
                 <tbody>
-                  {results.map((s) => (
-                    <tr key={s.symbol}>
-                      <td style={{ color: 'var(--color-accent)' }}>{s.symbol}</td>
-                      <td>{s.name}</td>
-                      <td>{s.market === 'HK' ? '港股' : '美股'}</td>
-                      <td>{s.price.toFixed(2)}</td>
-                      <td className={s.changePercent >= 0 ? 'color-up' : 'color-down'}>
-                        {s.changePercent >= 0 ? '+' : ''}{s.changePercent.toFixed(2)}%
-                      </td>
-                      <td>{s.pe?.toFixed(1) ?? '-'}</td>
-                      <td>{s.marketCap ? `${(s.marketCap / 1e8).toFixed(0)}亿` : '-'}</td>
-                    </tr>
-                  ))}
+                  {results.map((s: any) => {
+                    const sym = s.symbol ?? '';
+                    const isHK = /^\d{5}$/.test(sym);
+                    const name = s.shortName ?? s.name ?? '';
+                    const price = s.regularMarketPrice ?? s.price ?? 0;
+                    const changePct = s.regularMarketChangePercent ?? s.changePercent ?? 0;
+                    const pe = s.trailingPE ?? s.pe;
+                    const mktCap = s.marketCap;
+                    return (
+                      <tr key={sym}>
+                        <td style={{ color: 'var(--color-accent)' }}>{sym}</td>
+                        <td>{(name ?? '').length > 20 ? (name ?? '').slice(0, 18) + '...' : name}</td>
+                        <td>{isHK ? '港股' : '美股'}</td>
+                        <td>{price ? price.toFixed(2) : '---'}</td>
+                        <td className={changePct >= 0 ? 'color-up' : 'color-down'}>
+                          {changePct != null ? `${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%` : '---'}
+                        </td>
+                        <td>{pe?.toFixed(1) ?? '-'}</td>
+                        <td>{mktCap ? `${(mktCap / 1e8).toFixed(0)}亿` : '-'}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

@@ -23,9 +23,11 @@ export default function Market() {
   const volumeSeries = useRef<ISeriesApi<'Histogram'> | null>(null);
 
   const [selectedSymbol, setSelectedSymbol] = useState('00700');
-  const [activePeriod, setActivePeriod] = useState(4); // index into PERIODS
+  const [activePeriod, setActivePeriod] = useState(4);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
+  const [marketFilter, setMarketFilter] = useState<'ALL' | 'HK' | 'US'>('ALL');
+  const [showAllStocks, setShowAllStocks] = useState(false);
 
   const { quotes } = useQuotes(ALL_STOCKS, 30_000);
   const { quotes: searchQuotes } = useQuotes(
@@ -37,7 +39,17 @@ export default function Market() {
 
   const selectedQuote = quotes.find((q) => q.symbol === selectedSymbol);
 
-  // Build chart
+  // Filter stocks by market
+  const filteredQuotes = quotes.filter((q) => {
+    const sym = q.symbol ?? '';
+    const isHK = /^\d{5}$/.test(sym);
+    if (marketFilter === 'HK') return isHK;
+    if (marketFilter === 'US') return !isHK;
+    return true;
+  });
+
+  const stockList = searchQuery ? searchQuotes : filteredQuotes;
+  const visibleStocks = showAllStocks ? stockList : stockList.slice(0, 20);
   useEffect(() => {
     if (!chartRef.current) return;
 
@@ -119,8 +131,6 @@ export default function Market() {
     }
   }, [search]);
 
-  const stockList = searchQuery ? searchQuotes : quotes;
-
   const q = selectedQuote;
   const price = q?.regularMarketPrice ?? 0;
   const change = q?.regularMarketChange ?? 0;
@@ -171,8 +181,13 @@ export default function Market() {
               )}
             </div>
           </div>
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            {stockList.slice(0, 12).map((item: any) => {
+          <div className="flex gap-2 mb-3">
+            <button className={`btn btn-sm ${marketFilter === 'ALL' ? 'btn-primary' : ''}`} onClick={() => setMarketFilter('ALL')}>全部 ({ALL_STOCKS.length})</button>
+            <button className={`btn btn-sm ${marketFilter === 'HK' ? 'btn-primary' : ''}`} onClick={() => setMarketFilter('HK')}>港股</button>
+            <button className={`btn btn-sm ${marketFilter === 'US' ? 'btn-primary' : ''}`} onClick={() => setMarketFilter('US')}>美股</button>
+          </div>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', maxHeight: showAllStocks ? 'none' : 120, overflow: 'hidden', position: 'relative' }}>
+            {visibleStocks.map((item: any) => {
               const sym = item.symbol ?? '';
               const name = item.shortName ?? item.name ?? '';
               const chg = item.regularMarketChangePercent ?? item.changePercent ?? 0;
@@ -181,6 +196,7 @@ export default function Market() {
                   key={sym}
                   className={`btn btn-sm ${selectedSymbol === sym ? 'btn-primary' : ''}`}
                   onClick={() => setSelectedSymbol(sym)}
+                  title={name}
                 >
                   {sym}
                   <span className={chg >= 0 ? 'color-up' : 'color-down'} style={{ fontSize: '10px' }}>
@@ -190,6 +206,15 @@ export default function Market() {
               );
             })}
           </div>
+          {stockList.length > 20 && (
+            <button
+              className="btn btn-sm mt-2"
+              onClick={() => setShowAllStocks(!showAllStocks)}
+              style={{ width: '100%' }}
+            >
+              {showAllStocks ? '收起 ▲' : `展开全部 (${stockList.length} 只) ▼`}
+            </button>
+          )}
         </div>
 
         {/* Quote Summary */}
